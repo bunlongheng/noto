@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var authManager: AuthManager
     @State private var showNewNote = false
     @State private var newTitle = ""
     @State private var newFolder = "CLAUDE"
@@ -84,6 +85,16 @@ struct SidebarView: View {
                 Text("\(appState.notes.count) notes")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
+
+                Button {
+                    authManager.signOut()
+                } label: {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Sign out")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

@@ -52,6 +52,17 @@ cat > "$APP_NAME.app/Contents/Info.plist" << 'PLIST'
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.bheng.stickies-native</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>stickiesnative</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

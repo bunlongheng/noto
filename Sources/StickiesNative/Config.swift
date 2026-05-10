@@ -1,7 +1,10 @@
 import Foundation
 
 enum Config {
-    /// API key for the Stickies ext API.
-    /// Set the STICKIES_API_KEY environment variable, or replace this placeholder.
-    static let apiKey: String = "***REMOVED***"
+    static let supabaseURL = "https://esziekejpiuquyjfquye.supabase.co"
+    static let supabaseAnonKey = "***REMOVED***"
+    static let appBaseURL = "https://stickies-bheng.vercel.app"
+    /// Custom URL scheme for OAuth callback
+    static let callbackScheme = "stickiesnative"
+    static let callbackURL = "\(callbackScheme)://auth/callback"
 }
