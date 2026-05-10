@@ -4,38 +4,31 @@ import SwiftUI
 struct StickiesNativeApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var authManager = AuthManager()
+    @AppStorage("appThemeMode") private var themeMode: ThemeMode = .auto
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if authManager.isAuthenticated {
-                    ContentView()
-                        .environmentObject(appState)
-                        .frame(minWidth: 900, minHeight: 600)
-                } else {
-                    LoginView()
-                        .environmentObject(authManager)
-                        .frame(width: 400, height: 480)
-                }
-            }
-            .environmentObject(authManager)
-            .onOpenURL { url in
-                Task { await authManager.handleCallback(url: url) }
-            }
-            .onChange(of: authManager.accessToken) {
-                if let token = authManager.accessToken {
-                    appState.apiClient.setToken(token)
+            ContentView()
+                .environmentObject(appState)
+                .environmentObject(authManager)
+                .frame(minWidth: 900, minHeight: 600)
+                .preferredColorScheme(themeMode.colorScheme)
+                .onAppear {
+                    appState.apiClient.setToken(Config.localApiKey)
                     Task { await appState.loadNotes() }
                 }
-            }
-            .onAppear {
-                if let token = authManager.accessToken {
-                    appState.apiClient.setToken(token)
-                }
-            }
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1200, height: 800)
+        .commands {
+            CommandGroup(after: .appSettings) {
+                Menu("Theme") {
+                    Button("Auto") { themeMode = .auto }
+                    Button("Light") { themeMode = .light }
+                    Button("Dark") { themeMode = .dark }
+                }
+            }
+        }
     }
 }
 
@@ -111,6 +104,18 @@ class AppState: ObservableObject {
             selectedNoteId = note.id
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+enum ThemeMode: String {
+    case auto, light, dark
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .auto: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 }

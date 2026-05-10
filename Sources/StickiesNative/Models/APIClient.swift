@@ -46,13 +46,13 @@ final class APIClient: @unchecked Sendable {
     }
 
     func fetchNotes(limit: Int = 50) async throws -> [Note] {
-        let data = try await makeRequest(path: "/api/stickies?limit=\(limit)")
+        let data = try await makeRequest(path: "/api/stickies/ext?limit=\(limit)")
         let response = try JSONDecoder().decode(NotesResponse.self, from: data)
         return response.notes
     }
 
     func fetchNote(id: String) async throws -> Note {
-        let data = try await makeRequest(path: "/api/stickies?id=\(id)")
+        let data = try await makeRequest(path: "/api/stickies/ext?id=\(id)")
         let response = try JSONDecoder().decode(SingleNoteResponse.self, from: data)
         return response.note
     }
@@ -60,7 +60,7 @@ final class APIClient: @unchecked Sendable {
     func updateNote(id: String, content: String, type: String = "html") async throws {
         let payload: [String: String] = ["id": id, "content": content, "type": type]
         let body = try JSONEncoder().encode(payload)
-        _ = try await makeRequest(path: "/api/stickies", method: "PATCH", body: body)
+        _ = try await makeRequest(path: "/api/stickies/ext", method: "PATCH", body: body)
     }
 
     func createNote(title: String, content: String, folderName: String, type: String = "html") async throws -> Note {
@@ -71,7 +71,7 @@ final class APIClient: @unchecked Sendable {
             "type": type
         ]
         let body = try JSONEncoder().encode(payload)
-        let data = try await makeRequest(path: "/api/stickies", method: "POST", body: body)
+        let data = try await makeRequest(path: "/api/stickies/ext", method: "POST", body: body)
 
         if let response = try? JSONDecoder().decode(SingleNoteResponse.self, from: data) {
             return response.note

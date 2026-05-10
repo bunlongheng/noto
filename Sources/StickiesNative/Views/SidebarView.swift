@@ -3,6 +3,7 @@ import SwiftUI
 struct SidebarView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var authManager: AuthManager
+    @AppStorage("appThemeMode") private var themeMode: ThemeMode = .auto
     @State private var showNewNote = false
     @State private var newTitle = ""
     @State private var newFolder = "CLAUDE"
@@ -87,14 +88,18 @@ struct SidebarView: View {
                     .foregroundColor(.secondary)
 
                 Button {
-                    authManager.signOut()
+                    switch themeMode {
+                    case .auto: themeMode = .light
+                    case .light: themeMode = .dark
+                    case .dark: themeMode = .auto
+                    }
                 } label: {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                    Image(systemName: themeMode == .light ? "sun.max.fill" : themeMode == .dark ? "moon.fill" : "circle.lefthalf.filled")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
-                .help("Sign out")
+                .help("Theme: \(themeMode.rawValue)")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
