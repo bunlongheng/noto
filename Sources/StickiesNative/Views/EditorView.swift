@@ -8,6 +8,7 @@ struct EditorView: View {
     @State private var isLoadingContent = true
     @State private var saveTimer: Timer?
     @State private var hasUnsavedChanges = false
+    @State private var isSaving = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +37,14 @@ struct EditorView: View {
 
                 Spacer()
 
-                if hasUnsavedChanges {
+                if isSaving {
+                    HStack(spacing: 4) {
+                        ProgressView().scaleEffect(0.5)
+                        Text("Saving...")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.blue)
+                    }
+                } else if hasUnsavedChanges {
                     Text("Unsaved")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.orange)
@@ -47,7 +55,7 @@ struct EditorView: View {
                 }
 
                 Button {
-                    saveNow()
+                    Task { await saveNow() }
                 } label: {
                     Image(systemName: "icloud.and.arrow.up")
                         .font(.system(size: 14))
@@ -85,6 +93,8 @@ struct EditorView: View {
             } else {
                 RichTextEditor(
                     attributedText: $attributedText,
+                    apiClient: appState.apiClient,
+                    folderName: note.folderName ?? "native",
                     onTextChange: {
                         hasUnsavedChanges = true
                         scheduleSave()
@@ -98,7 +108,7 @@ struct EditorView: View {
         .onDisappear {
             saveTimer?.invalidate()
             if hasUnsavedChanges {
-                saveNow()
+                Task { await saveNow() }
             }
         }
     }
@@ -106,40 +116,149 @@ struct EditorView: View {
     private func loadContent() async {
         isLoadingContent = true
         if let content = await appState.loadNoteContent(id: note.id) {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 14),
-                .foregroundColor: NSColor.textColor
-            ]
-            attributedText = NSAttributedString(string: content, attributes: attrs)
+            let noteType = note.type ?? "text"
+            if noteType == "html" || content.contains("<") && content.contains(">") {
+                // Parse HTML into attributed string
+                if let htmlData = content.data(using: .utf8),
+                   let attrStr = try? NSAttributedString(
+                       data: htmlData,
+                       options: [
+                           .documentType: NSAttributedString.DocumentType.html,
+                           .characterEncoding: String.Encoding.utf8.rawValue
+                       ],
+                       documentAttributes: nil
+                   ) {
+                    attributedText = attrStr
+                } else {
+                    attributedText = makeDefaultString(content)
+                }
+            } else {
+                attributedText = makeDefaultString(content)
+            }
         } else {
-            attributedText = NSAttributedString(string: note.content ?? "")
+            attributedText = makeDefaultString(note.content ?? "")
         }
         isLoadingContent = false
+    }
+
+    private func makeDefaultString(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 14),
+            .foregroundColor: NSColor.textColor
+        ])
     }
 
     private func scheduleSave() {
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [self] _ in
             Task { @MainActor in
-                saveNow()
+                await saveNow()
             }
         }
     }
 
-    private func saveNow() {
+    private func saveNow() async {
         guard hasUnsavedChanges else { return }
-        let content = attributedText.string
+        isSaving = true
         hasUnsavedChanges = false
-        Task {
-            await appState.updateNote(id: note.id, content: content)
+
+        // Extract images, upload to GDrive, replace with <img> tags
+        let processed = await processImagesForUpload(attributedText, apiClient: appState.apiClient, folder: note.folderName ?? "native")
+
+        // Convert to HTML
+        let html = attributedStringToHTML(processed)
+
+        await appState.updateNote(id: note.id, content: html)
+        isSaving = false
+    }
+}
+
+// MARK: - Image processing: extract embedded images, upload, replace with URLs
+
+func processImagesForUpload(_ attrString: NSAttributedString, apiClient: APIClient, folder: String) async -> NSAttributedString {
+    let mutable = NSMutableAttributedString(attributedString: attrString)
+    var imageRanges: [(NSRange, NSTextAttachment)] = []
+
+    // Find all image attachments
+    mutable.enumerateAttribute(.attachment, in: NSRange(location: 0, length: mutable.length)) { value, range, _ in
+        if let attachment = value as? NSTextAttachment {
+            imageRanges.append((range, attachment))
         }
     }
+
+    // Process in reverse order so ranges stay valid
+    for (range, attachment) in imageRanges.reversed() {
+        var imageData: Data?
+
+        if let data = attachment.contents {
+            imageData = data
+        } else if let image = attachment.image {
+            imageData = image.tiffRepresentation.flatMap {
+                NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:])
+            }
+        } else if let cell = attachment.attachmentCell as? NSTextAttachmentCell,
+                  let image = cell.image {
+            imageData = image.tiffRepresentation.flatMap {
+                NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:])
+            }
+        }
+
+        guard let data = imageData else { continue }
+
+        let filename = "native-\(UUID().uuidString.prefix(8)).png"
+        do {
+            let url = try await apiClient.uploadImage(imageData: data, filename: filename, folder: folder)
+            let imgTag = "<img src=\"\(url)\" alt=\"\(filename)\" style=\"max-width:100%\">"
+            let replacement = NSAttributedString(string: imgTag, attributes: [
+                .font: NSFont.systemFont(ofSize: 14),
+                .foregroundColor: NSColor.textColor
+            ])
+            mutable.replaceCharacters(in: range, with: replacement)
+        } catch {
+            // Keep the attachment if upload fails
+        }
+    }
+
+    return mutable
+}
+
+// MARK: - Convert NSAttributedString to HTML
+
+func attributedStringToHTML(_ attrString: NSAttributedString) -> String {
+    // If the string already contains img tags (from uploaded images), use a hybrid approach
+    let plainText = attrString.string
+
+    // Check if there are any remaining attachments (shouldn't be after processing)
+    var hasAttachments = false
+    attrString.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attrString.length)) { value, _, stop in
+        if value != nil { hasAttachments = true; stop.pointee = true }
+    }
+
+    // Try native HTML export for rich text
+    if let htmlData = try? attrString.data(
+        from: NSRange(location: 0, length: attrString.length),
+        documentAttributes: [.documentType: NSAttributedString.DocumentType.html]
+    ), let html = String(data: htmlData, encoding: .utf8) {
+        // Clean up the HTML - extract just the body content
+        if let bodyStart = html.range(of: "<body>"),
+           let bodyEnd = html.range(of: "</body>") {
+            let bodyContent = String(html[bodyStart.upperBound..<bodyEnd.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return bodyContent
+        }
+        return html
+    }
+
+    // Fallback: return plain text
+    return plainText
 }
 
 // MARK: - NSTextView wrapper for rich text editing
 
 struct RichTextEditor: NSViewRepresentable {
     @Binding var attributedText: NSAttributedString
+    var apiClient: APIClient
+    var folderName: String
     var onTextChange: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -161,6 +280,9 @@ struct RichTextEditor: NSViewRepresentable {
         textView.allowsImageEditing = true
         textView.importsGraphics = true
 
+        // Register for file drops
+        textView.registerForDraggedTypes([.fileURL, .png, .tiff, .pdf])
+
         textView.font = NSFont.systemFont(ofSize: 14)
         textView.textColor = NSColor.textColor
         textView.backgroundColor = NSColor.textBackgroundColor
@@ -177,7 +299,6 @@ struct RichTextEditor: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
 
-        // Only update if the text actually differs (avoid cursor jump)
         if textView.attributedString() != attributedText {
             let selectedRanges = textView.selectedRanges
             textView.textStorage?.setAttributedString(attributedText)
@@ -199,9 +320,31 @@ struct RichTextEditor: NSViewRepresentable {
             parent.onTextChange()
         }
 
-        // Support pasting images
+        @objc func zoomIn() {
+            changeFontSize(by: 2)
+        }
+
+        @objc func zoomOut() {
+            changeFontSize(by: -2)
+        }
+
+        private func changeFontSize(by delta: CGFloat) {
+            guard let textView, let storage = textView.textStorage else { return }
+            let range = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.enumerateAttribute(.font, in: range) { value, attrRange, _ in
+                if let font = value as? NSFont {
+                    let newSize = max(8, font.pointSize + delta)
+                    let newFont = NSFontManager.shared.convert(font, toSize: newSize)
+                    storage.addAttribute(.font, value: newFont, range: attrRange)
+                }
+            }
+            storage.endEditing()
+            parent.attributedText = textView.attributedString()
+            parent.onTextChange()
+        }
+
         func textView(_ textView: NSTextView, willPaste pasteboard: NSPasteboard) -> Bool {
-            // Let NSTextView handle image pasting natively
             return false
         }
     }

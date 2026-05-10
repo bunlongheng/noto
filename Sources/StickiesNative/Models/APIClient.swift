@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 final class APIClient: @unchecked Sendable {
     private let baseURL = Config.appBaseURL
@@ -8,7 +9,7 @@ final class APIClient: @unchecked Sendable {
         self.token = token
     }
 
-    private func makeRequest(path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+    private func makeRequest(path: String, method: String = "GET", body: Data? = nil, contentType: String = "application/json") async throws -> Data {
         guard let token else {
             throw APIError.notAuthenticated
         }
@@ -20,7 +21,7 @@ final class APIClient: @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
 
         if let body {
             request.httpBody = body
@@ -56,17 +57,18 @@ final class APIClient: @unchecked Sendable {
         return response.note
     }
 
-    func updateNote(id: String, content: String) async throws {
-        let payload: [String: String] = ["id": id, "content": content]
+    func updateNote(id: String, content: String, type: String = "html") async throws {
+        let payload: [String: String] = ["id": id, "content": content, "type": type]
         let body = try JSONEncoder().encode(payload)
         _ = try await makeRequest(path: "/api/stickies", method: "PATCH", body: body)
     }
 
-    func createNote(title: String, content: String, folderName: String) async throws -> Note {
+    func createNote(title: String, content: String, folderName: String, type: String = "html") async throws -> Note {
         let payload: [String: String] = [
             "title": title,
             "content": content,
-            "folder_name": folderName
+            "folder_name": folderName,
+            "type": type
         ]
         let body = try JSONEncoder().encode(payload)
         let data = try await makeRequest(path: "/api/stickies", method: "POST", body: body)
@@ -84,8 +86,53 @@ final class APIClient: @unchecked Sendable {
             folderName: folderName,
             folderColor: nil,
             updatedAt: ISO8601DateFormatter().string(from: Date()),
-            type: "text"
+            type: type
         )
+    }
+
+    /// Upload an image file to Google Drive via the Stickies API
+    func uploadImage(imageData: Data, filename: String, folder: String = "native") async throws -> String {
+        guard let token else { throw APIError.notAuthenticated }
+
+        let boundary = UUID().uuidString
+        var body = Data()
+
+        // File field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // Folder field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"folder\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(folder)\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        guard let url = URL(string: "\(baseURL)/api/stickies/gdrive") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.httpError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: "Upload failed")
+        }
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let imageUrl = json?["url"] as? String else {
+            throw APIError.invalidResponse
+        }
+
+        return imageUrl
     }
 }
 
