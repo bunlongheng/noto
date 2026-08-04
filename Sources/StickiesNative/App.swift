@@ -3,14 +3,12 @@ import SwiftUI
 @main
 struct StickiesNativeApp: App {
     @StateObject private var appState = AppState()
-    @StateObject private var authManager = AuthManager()
     @AppStorage("appThemeMode") private var themeMode: ThemeMode = .auto
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
-                .environmentObject(authManager)
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(themeMode.colorScheme)
                 .onAppear {

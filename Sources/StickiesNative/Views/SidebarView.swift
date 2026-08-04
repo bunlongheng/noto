@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject var appState: AppState
-    @EnvironmentObject var authManager: AuthManager
     @AppStorage("appThemeMode") private var themeMode: ThemeMode = .auto
     @State private var showNewNote = false
     @State private var newTitle = ""
