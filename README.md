@@ -1,5 +1,37 @@
 # StickiesNative
 
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph UI["SwiftUI Views"]
+        CV["ContentView - split layout"]
+        SB["SidebarView - note list and search"]
+        ED["EditorView - note editor"]
+        TB["ToolbarView - actions and theme"]
+    end
+    AS["AppState - observable store of notes"]
+    AM["AuthManager - Google OAuth, tokens in UserDefaults"]
+    AC["APIClient - Bearer token HTTP client"]
+    EXT["Stickies API on localhost 4444 - /api/stickies/ext"]
+    GD["Image upload - /api/stickies/gdrive to Google Drive"]
+    SUPA["Supabase Auth"]
+
+    CV --> SB
+    CV --> ED
+    CV --> TB
+    SB --> AS
+    ED --> AS
+    AS -->|fetch create update notes| AC
+    AC -->|GET POST PATCH| EXT
+    AC -->|multipart POST| GD
+    AM -->|sign in and refresh| SUPA
+    AM -.->|access token| AC
+```
+
+*Native macOS SwiftUI client: views read from AppState, which drives APIClient calls to the Stickies web API on port 4444, with Google sign-in handled through Supabase Auth.*
+
+
 A native macOS client for [Stickies](https://github.com/bunlongheng) - a two-pane SwiftUI editor for browsing, writing, and syncing notes stored on the Stickies web app, with rich text, drag-and-drop images, and autosave.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -85,3 +117,9 @@ swift run
 ## License
 
 MIT - see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  <sub>Built by <a href="https://bunlongheng.com">Bunlong Heng</a> &middot; <a href="https://bunlongheng.com/projects/stickies-mobile-demo">See it in my portfolio &rarr;</a></sub>
+</p>
