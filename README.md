@@ -15,7 +15,6 @@ flowchart TD
     AC["APIClient - Bearer token HTTP client"]
     EXT["Stickies API on localhost 4444 - /api/stickies/ext"]
     GD["Image upload - /api/stickies/gdrive to Google Drive"]
-    SUPA["Supabase Auth"]
 
     CV --> SB
     CV --> ED
@@ -25,11 +24,10 @@ flowchart TD
     AS -->|fetch create update notes| AC
     AC -->|GET POST PATCH| EXT
     AC -->|multipart POST| GD
-    AM -->|sign in and refresh| SUPA
     AM -.->|access token| AC
 ```
 
-*Native macOS SwiftUI client: views read from AppState, which drives APIClient calls to the Stickies web API on port 4444, with Google sign-in handled through Supabase Auth.*
+*Native macOS SwiftUI client: views read from AppState, which drives APIClient calls to the Stickies web API on port 4444, with Google sign-in handled by AuthManager (Google OAuth).*
 
 
 A native macOS client for [Stickies](https://github.com/bunlongheng) - a two-pane SwiftUI editor for browsing, writing, and syncing notes stored on the Stickies web app, with rich text, drag-and-drop images, and autosave.
