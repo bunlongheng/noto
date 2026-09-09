@@ -109,18 +109,18 @@ struct RootView: View {
                     TextField("Find in note", text: $find)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
-                        .frame(width: 165)
+                        .frame(width: 150)
                         .focused($findFocused)
-                        .onSubmit { host.find(find, forward: true) }
-                        .onChange(of: find) { _, new in host.find(new, forward: true) }
-                    if host.noMatch && !find.isEmpty {
-                        Text("none").font(.system(size: 10)).foregroundStyle(.orange)
-                    }
+                        .onSubmit { host.step(true) }
+                        .onChange(of: find) { _, new in host.find(new) }
                     if !find.isEmpty {
-                        Button { host.find(find, forward: false) } label: { Image(systemName: "chevron.up").font(.system(size: 10)) }
-                            .buttonStyle(.plain).accessibilityLabel("Previous match")
-                        Button { host.find(find, forward: true) } label: { Image(systemName: "chevron.down").font(.system(size: 10)) }
-                            .buttonStyle(.plain).accessibilityLabel("Next match")
+                        Text(host.matches == 0 ? "none" : "\(host.current)/\(host.matches)")
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(host.matches == 0 ? .orange : .secondary)
+                        Button { host.step(false) } label: { Image(systemName: "chevron.up").font(.system(size: 10)) }
+                            .buttonStyle(.plain).disabled(host.matches == 0).accessibilityLabel("Previous match")
+                        Button { host.step(true) } label: { Image(systemName: "chevron.down").font(.system(size: 10)) }
+                            .buttonStyle(.plain).disabled(host.matches == 0).accessibilityLabel("Next match")
                         Button { find = ""; host.clear() } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
                             .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear find")
                     }
