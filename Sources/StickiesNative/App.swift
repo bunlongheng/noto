@@ -6,28 +6,18 @@ struct StickiesNativeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            NavigationSplitView {
-                NoteListView()
-                    .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
-            } detail: {
-                if let id = state.selected, let note = state.notes.first(where: { $0.id == id }) {
-                    NoteDetailView(note: note)
-                } else {
-                    Text("Select a note")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .environmentObject(state)
-            .frame(minWidth: 760, minHeight: 420)
-            .task { await state.load() }
+            RootView().environmentObject(state)
         }
         .defaultSize(width: 1100, height: 780)
         .commands {
-            CommandGroup(replacing: .newItem) { }   // read-only app, no New
+            CommandGroup(replacing: .newItem) { }   // read-mostly app, no New
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { Task { await state.load() } }
                     .keyboardShortcut("r", modifiers: .command)
+                Button("Find in Note") { NotificationCenter.default.post(name: .focusFind, object: nil) }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("Search Notes") { NotificationCenter.default.post(name: .focusSearch, object: nil) }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
             }
         }
     }
@@ -40,11 +30,12 @@ final class AppState: ObservableObject {
     @Published var error: String?
     @Published var query = ""
     @Published var selected: Note.ID?
+    @Published var toast: String?
 
     let api = APIClient()
 
-    /// Local filter on title + folder. Instant, and it covers all 1,386 notes -
-    /// the server's q= search reads content too but is capped at 50 rows
+    /// Local filter on title + folder. Instant, and it covers all notes - the
+    /// server's q= search reads content too but caps at 50 rows
     /// (app/api/stickies/route.ts:552), which would hide notes rather than find them.
     var visible: [Note] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -55,15 +46,107 @@ final class AppState: ObservableObject {
         }
     }
 
+    var selectedNote: Note? { notes.first { $0.id == selected } }
+
     func load() async {
         isLoading = true
         error = nil
-        do {
-            notes = try await api.fetchAllNotes()
-        } catch {
-            self.error = error.localizedDescription
-        }
+        do { notes = try await api.fetchAllNotes() }
+        catch { self.error = error.localizedDescription }
         isLoading = false
+    }
+
+    /// Move to TRASH. Not a destructive delete - the server purges trash on its own
+    /// 7 day schedule, and the note stays recoverable until then.
+    func trashSelected() async {
+        guard let note = selectedNote else { return }
+        do {
+            try await api.trash(id: note.id)
+            notes.removeAll { $0.id == note.id }
+            selected = nil
+            show("Moved to TRASH: \(note.title)")
+        } catch {
+            show("Could not trash it: \(error.localizedDescription)")
+        }
+    }
+
+    private func show(_ message: String) {
+        toast = message
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if toast == message { toast = nil }
+        }
+    }
+}
+
+struct RootView: View {
+    @EnvironmentObject var state: AppState
+    @State private var confirmTrash = false
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        NavigationSplitView {
+            NoteListView()
+                .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
+        } detail: {
+            if let note = state.selectedNote {
+                NoteDetailView(note: note)
+            } else {
+                Text("Select a note")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(minWidth: 760, minHeight: 420)
+        .task { await state.load() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+                    TextField("Search notes", text: $state.query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .frame(width: 190)
+                        .focused($searchFocused)
+                    if !state.query.isEmpty {
+                        Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { confirmTrash = true } label: { Image(systemName: "trash") }
+                    .disabled(state.selectedNote == nil)
+                    .help("Move to TRASH")
+                    .accessibilityLabel("Move note to trash")
+            }
+        }
+        .confirmationDialog(
+            "Move \"\(state.selectedNote?.title ?? "")\" to TRASH?",
+            isPresented: $confirmTrash, titleVisibility: .visible
+        ) {
+            Button("Move to TRASH", role: .destructive) { Task { await state.trashSelected() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("It stays recoverable in TRASH until the server's 7 day cleanup.")
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = state.toast {
+                Text(toast)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(2)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+                    .shadow(radius: 8, y: 3)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: state.toast)
     }
 }
 
@@ -72,7 +155,20 @@ struct NoteListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            HStack(spacing: 8) {
+                Text("All Notes").font(.system(size: 15, weight: .semibold))
+                Text(state.query.isEmpty ? "\(state.notes.count)" : "\(state.visible.count) of \(state.notes.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.15))
+                    .clipShape(Capsule())
+                Spacer()
+                if state.isLoading { ProgressView().scaleEffect(0.5) }
+                Button { Task { await state.load() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+
             Divider()
 
             if let error = state.error {
@@ -92,66 +188,15 @@ struct NoteListView: View {
         }
     }
 
-    private var header: some View {
-        VStack(spacing: 8) {
-        HStack(spacing: 8) {
-            Text("All Notes")
-                .font(.system(size: 15, weight: .semibold))
-            Text(state.query.isEmpty ? "\(state.notes.count)" : "\(state.visible.count) of \(state.notes.count)")
-                .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(Color.secondary.opacity(0.15))
-                .clipShape(Capsule())
-            Spacer()
-            if state.isLoading { ProgressView().scaleEffect(0.5) }
-            Button { Task { await state.load() } } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.plain)
-            .help("Refresh (Cmd+R)")
-            .accessibilityLabel("Refresh notes")
-        }
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            TextField("Search title or folder", text: $state.query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-            if !state.query.isEmpty {
-                Button { state.query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 11))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(Color.secondary.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-    }
-
     private func message(_ text: String, systemImage: String?, retry: Bool) -> some View {
         VStack(spacing: 10) {
             Spacer()
             if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
+                Image(systemName: systemImage).font(.system(size: 28)).foregroundStyle(.secondary)
             }
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 30)
-            if retry {
-                Button("Try again") { Task { await state.load() } }
-            }
+            Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).padding(.horizontal, 30)
+            if retry { Button("Try again") { Task { await state.load() } } }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -163,34 +208,29 @@ struct NoteRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 8, height: 8)
-                .accessibilityHidden(true)
+            Image(systemName: NoteIcon.symbol(for: note.icon))
+                .font(.system(size: 13))
+                .frame(width: 18)
+                .foregroundStyle(tint)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(note.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
+                Text(note.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                 if let folder = note.folderName, !folder.isEmpty {
-                    Text(folder)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    Text(folder).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
 
             Spacer()
 
-            Text(note.displayDate)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+            Text(note.displayDate).font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
     }
 
-    private var dotColor: Color {
-        guard let c = note.parsedColor else { return .secondary.opacity(0.4) }
+    /// Keep the folder colour the dot used to carry - now it tints the icon.
+    private var tint: Color {
+        guard let c = note.parsedColor else { return .secondary }
         return Color(red: c.r, green: c.g, blue: c.b)
     }
 }

@@ -9,9 +9,10 @@ struct Note: Identifiable, Codable, Equatable {
     var createdAt: String?
     var type: String?
     var content: String?
+    var icon: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, type, content
+        case id, title, type, content, icon
         case folderName = "folder_name"
         case folderColor = "folder_color"
         case updatedAt = "updated_at"
