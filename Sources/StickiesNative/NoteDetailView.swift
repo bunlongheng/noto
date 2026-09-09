@@ -73,30 +73,24 @@ struct HTMLView: NSViewRepresentable {
 
 struct NoteDetailView: View {
     let note: Note
+    @ObservedObject var host: WebHost
     @EnvironmentObject var state: AppState
-    @StateObject private var host = WebHost()
     @State private var content: String?
     @State private var error: String?
-    @State private var find = ""
-    @FocusState private var findFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            findBar
-            Divider()
-            Group {
-                if let error {
-                    centered(Text(error).foregroundStyle(.secondary))
-                } else if let content {
-                    HTMLView(html: content, isHTML: (note.type ?? "") == "html", host: host)
-                } else {
-                    centered(ProgressView())
-                }
+        Group {
+            if let error {
+                centered(Text(error).foregroundStyle(.secondary))
+            } else if let content {
+                HTMLView(html: content, isHTML: (note.type ?? "") == "html", host: host)
+            } else {
+                centered(ProgressView())
             }
         }
         .navigationTitle(note.title)
         .task(id: note.id) {
-            content = nil; error = nil; find = ""; host.clear()
+            content = nil; error = nil; host.clear()
             do {
                 content = try await state.api.fetchNote(id: note.id).content ?? ""
             } catch is CancellationError {
@@ -107,40 +101,6 @@ struct NoteDetailView: View {
                 self.error = error.localizedDescription
             }
         }
-        .onExitCommand { find = ""; host.clear() }
-    }
-
-    /// Find-in-note. Cmd-F focuses it; Return and Shift-Return step through matches.
-    private var findBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "text.magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            TextField("Find in note", text: $find)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .focused($findFocused)
-                .onSubmit { host.find(find, forward: true) }
-                .onChange(of: find) { _, new in host.find(new, forward: true) }
-            if host.noMatch && !find.isEmpty {
-                Text("no match")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.orange)
-            }
-            if !find.isEmpty {
-                Button { host.find(find, forward: false) } label: { Image(systemName: "chevron.up") }
-                    .buttonStyle(.plain).accessibilityLabel("Previous match")
-                Button { host.find(find, forward: true) } label: { Image(systemName: "chevron.down") }
-                    .buttonStyle(.plain).accessibilityLabel("Next match")
-                Button { find = ""; host.clear() } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear find")
-            }
-        }
-        .font(.system(size: 11))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(.bar)
-        .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in findFocused = true }
     }
 
     private func centered<V: View>(_ v: V) -> some View {

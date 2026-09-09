@@ -81,8 +81,10 @@ final class AppState: ObservableObject {
 
 struct RootView: View {
     @EnvironmentObject var state: AppState
+    @StateObject private var host = WebHost()
     @State private var confirmTrash = false
-    @FocusState private var searchFocused: Bool
+    @State private var find = ""
+    @FocusState private var findFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -90,7 +92,8 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
         } detail: {
             if let note = state.selectedNote {
-                NoteDetailView(note: note)
+                NoteDetailView(note: note, host: host)
+                    .onChange(of: note.id) { _, _ in find = "" }
             } else {
                 Text("Select a note")
                     .foregroundStyle(.secondary)
@@ -101,22 +104,34 @@ struct RootView: View {
         .task { await state.load() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                    TextField("Search notes", text: $state.query)
+                HStack(spacing: 5) {
+                    Image(systemName: "text.magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+                    TextField("Find in note", text: $find)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
-                        .frame(width: 190)
-                        .focused($searchFocused)
-                    if !state.query.isEmpty {
-                        Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
-                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+                        .frame(width: 165)
+                        .focused($findFocused)
+                        .onSubmit { host.find(find, forward: true) }
+                        .onChange(of: find) { _, new in host.find(new, forward: true) }
+                    if host.noMatch && !find.isEmpty {
+                        Text("none").font(.system(size: 10)).foregroundStyle(.orange)
+                    }
+                    if !find.isEmpty {
+                        Button { host.find(find, forward: false) } label: { Image(systemName: "chevron.up").font(.system(size: 10)) }
+                            .buttonStyle(.plain).accessibilityLabel("Previous match")
+                        Button { host.find(find, forward: true) } label: { Image(systemName: "chevron.down").font(.system(size: 10)) }
+                            .buttonStyle(.plain).accessibilityLabel("Next match")
+                        Button { find = ""; host.clear() } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear find")
                     }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(Color.secondary.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
+                .disabled(state.selectedNote == nil)
+                .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in
+                    if state.selectedNote != nil { findFocused = true }
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { confirmTrash = true } label: { Image(systemName: "trash") }
@@ -152,6 +167,7 @@ struct RootView: View {
 
 struct NoteListView: View {
     @EnvironmentObject var state: AppState
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -167,7 +183,25 @@ struct NoteListView: View {
                 Button { Task { await state.load() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6)
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+                TextField("Search all notes", text: $state.query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($searchFocused)
+                if !state.query.isEmpty {
+                    Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
 
             Divider()
 
