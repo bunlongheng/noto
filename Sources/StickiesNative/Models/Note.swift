@@ -6,16 +6,23 @@ struct Note: Identifiable, Codable, Equatable {
     var folderName: String?
     var folderColor: String?
     var updatedAt: String?
+    var createdAt: String?
+    var type: String?
+    var content: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title
+        case id, title, type, content
         case folderName = "folder_name"
         case folderColor = "folder_color"
         case updatedAt = "updated_at"
+        case createdAt = "created_at"
     }
 
+    /// The All view is ordered by created_at server-side, so show creation time -
+    /// matching components/NoteTileListBody.tsx:185 in the web app. Falling back to
+    /// updated_at only when a row has no created_at.
     var displayDate: String {
-        guard let updatedAt else { return "" }
+        guard let updatedAt = createdAt ?? updatedAt else { return "" }
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let date = iso.date(from: updatedAt) ?? {
@@ -38,3 +45,4 @@ struct Note: Identifiable, Codable, Equatable {
 }
 
 struct NotesResponse: Codable { let notes: [Note] }
+struct SingleNoteResponse: Codable { let note: Note }

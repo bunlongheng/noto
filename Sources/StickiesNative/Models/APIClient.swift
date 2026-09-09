@@ -43,6 +43,24 @@ struct APIClient {
             if page.count < pageSize { break }   // short page = last page
             offset += pageSize
         }
+        // Server order is created_at DESC (the web All view). Never re-sort here.
         return all
+    }
+
+    /// One note WITH its body. The list endpoint omits content, so this runs only
+    /// when a row is selected.
+    func fetchNote(id: String) async throws -> Note {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url = URL(string: Config.appBaseURL + "/api/stickies/ext?id=" + id) else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(SingleNoteResponse.self, from: data).note
     }
 }
