@@ -3,14 +3,12 @@ import Foundation
 struct Note: Identifiable, Codable, Equatable {
     let id: String
     var title: String
-    var content: String?
     var folderName: String?
     var folderColor: String?
     var updatedAt: String?
-    var type: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, content, type
+        case id, title
         case folderName = "folder_name"
         case folderColor = "folder_color"
         case updatedAt = "updated_at"
@@ -18,42 +16,25 @@ struct Note: Identifiable, Codable, Equatable {
 
     var displayDate: String {
         guard let updatedAt else { return "" }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: updatedAt) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .short
-            return display.string(from: date)
-        }
-        // Try without fractional seconds
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: updatedAt) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .short
-            return display.string(from: date)
-        }
-        return updatedAt
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = iso.date(from: updatedAt) ?? {
+            iso.formatOptions = [.withInternetDateTime]
+            return iso.date(from: updatedAt)
+        }()
+        guard let date else { return updatedAt }
+        let out = DateFormatter()
+        out.dateStyle = .medium
+        out.timeStyle = .short
+        return out.string(from: date)
     }
 
+    /// #RRGGBB from the folder, or nil when absent or malformed.
     var parsedColor: (r: Double, g: Double, b: Double)? {
-        guard let hex = folderColor, hex.hasPrefix("#"), hex.count == 7 else { return nil }
-        let start = hex.index(hex.startIndex, offsetBy: 1)
-        let hexStr = String(hex[start...])
-        guard let val = UInt64(hexStr, radix: 16) else { return nil }
-        return (
-            r: Double((val >> 16) & 0xFF) / 255.0,
-            g: Double((val >> 8) & 0xFF) / 255.0,
-            b: Double(val & 0xFF) / 255.0
-        )
+        guard let hex = folderColor, hex.hasPrefix("#"), hex.count == 7,
+              let val = UInt64(hex.dropFirst(), radix: 16) else { return nil }
+        return (Double((val >> 16) & 0xFF) / 255, Double((val >> 8) & 0xFF) / 255, Double(val & 0xFF) / 255)
     }
 }
 
-struct NotesResponse: Codable {
-    let notes: [Note]
-}
-
-struct SingleNoteResponse: Codable {
-    let note: Note
-}
+struct NotesResponse: Codable { let notes: [Note] }

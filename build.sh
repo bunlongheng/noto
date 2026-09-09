@@ -49,23 +49,14 @@ cat > "$APP_NAME.app/Contents/Info.plist" << 'PLIST'
     <true/>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>com.bheng.stickies-native</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>stickiesnative</string>
-            </array>
-        </dict>
-    </array>
 </dict>
 </plist>
 PLIST
+
+codesign --force --deep --sign - "$APP_NAME.app" 2>/dev/null && echo "Signed (ad-hoc)"
 
 echo "Created: ./$APP_NAME.app"
 

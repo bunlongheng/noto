@@ -2,118 +2,144 @@ import SwiftUI
 
 @main
 struct StickiesNativeApp: App {
-    @StateObject private var appState = AppState()
-    @AppStorage("appThemeMode") private var themeMode: ThemeMode = .auto
+    @StateObject private var state = AppState()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(appState)
-                .frame(minWidth: 900, minHeight: 600)
-                .preferredColorScheme(themeMode.colorScheme)
-                .onAppear {
-                    appState.apiClient.setToken(Config.localApiKey)
-                    Task { await appState.loadNotes() }
-                }
+            NoteListView()
+                .environmentObject(state)
+                .frame(minWidth: 460, minHeight: 400)
+                .task { await state.load() }
         }
-        .windowStyle(.titleBar)
-        .defaultSize(width: 1200, height: 800)
+        .defaultSize(width: 620, height: 780)
         .commands {
-            CommandGroup(after: .appSettings) {
-                Menu("Theme") {
-                    Button("Auto") { themeMode = .auto }
-                    Button("Light") { themeMode = .light }
-                    Button("Dark") { themeMode = .dark }
-                }
+            CommandGroup(replacing: .newItem) { }   // read-only app, no New
+            CommandGroup(after: .toolbar) {
+                Button("Refresh") { Task { await state.load() } }
+                    .keyboardShortcut("r", modifiers: .command)
             }
         }
     }
 }
 
 @MainActor
-class AppState: ObservableObject {
+final class AppState: ObservableObject {
     @Published var notes: [Note] = []
-    @Published var selectedNoteId: String?
     @Published var isLoading = false
-    @Published var searchText = ""
-    @Published var errorMessage: String?
+    @Published var error: String?
 
-    let apiClient = APIClient()
+    private let api = APIClient()
 
-    var filteredNotes: [Note] {
-        if searchText.isEmpty {
-            return notes
-        }
-        return notes.filter { note in
-            note.title.localizedCaseInsensitiveContains(searchText) ||
-            (note.folderName ?? "").localizedCaseInsensitiveContains(searchText)
-        }
-    }
-
-    var selectedNote: Note? {
-        guard let id = selectedNoteId else { return nil }
-        return notes.first { $0.id == id }
-    }
-
-    func loadNotes() async {
+    func load() async {
         isLoading = true
-        errorMessage = nil
+        error = nil
         do {
-            let fetched = try await apiClient.fetchNotes()
-            notes = fetched
-            if selectedNoteId == nil, let first = fetched.first {
-                selectedNoteId = first.id
-            }
+            notes = try await api.fetchAllNotes()
         } catch {
-            errorMessage = error.localizedDescription
+            self.error = error.localizedDescription
         }
         isLoading = false
     }
+}
 
-    func loadNoteContent(id: String) async -> String? {
-        do {
-            let note = try await apiClient.fetchNote(id: id)
-            if let idx = notes.firstIndex(where: { $0.id == id }) {
-                notes[idx].content = note.content
+struct NoteListView: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+
+            if let error = state.error {
+                message(error, systemImage: "exclamationmark.triangle", retry: true)
+            } else if state.isLoading && state.notes.isEmpty {
+                message("Loading notes...", systemImage: nil, retry: false)
+            } else if state.notes.isEmpty {
+                message("No notes", systemImage: "tray", retry: true)
+            } else {
+                List(state.notes) { NoteRow(note: $0) }
+                    .listStyle(.inset)
             }
-            return note.content
-        } catch {
-            errorMessage = error.localizedDescription
-            return nil
         }
     }
 
-    func updateNote(id: String, content: String) async {
-        do {
-            try await apiClient.updateNote(id: id, content: content)
-            if let idx = notes.firstIndex(where: { $0.id == id }) {
-                notes[idx].content = content
-                notes[idx].updatedAt = ISO8601DateFormatter().string(from: Date())
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("All Notes")
+                .font(.system(size: 15, weight: .semibold))
+            Text("\(state.notes.count)")
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.15))
+                .clipShape(Capsule())
+            Spacer()
+            if state.isLoading { ProgressView().scaleEffect(0.5) }
+            Button { Task { await state.load() } } label: {
+                Image(systemName: "arrow.clockwise")
             }
-        } catch {
-            errorMessage = error.localizedDescription
+            .buttonStyle(.plain)
+            .help("Refresh (Cmd+R)")
+            .accessibilityLabel("Refresh notes")
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
-    func createNote(title: String, content: String, folderName: String) async {
-        do {
-            let note = try await apiClient.createNote(title: title, content: content, folderName: folderName)
-            notes.insert(note, at: 0)
-            selectedNoteId = note.id
-        } catch {
-            errorMessage = error.localizedDescription
+    private func message(_ text: String, systemImage: String?, retry: Bool) -> some View {
+        VStack(spacing: 10) {
+            Spacer()
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+            }
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 30)
+            if retry {
+                Button("Try again") { Task { await state.load() } }
+            }
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-enum ThemeMode: String {
-    case auto, light, dark
+struct NoteRow: View {
+    let note: Note
 
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .auto: return nil
-        case .light: return .light
-        case .dark: return .dark
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(note.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                if let folder = note.folderName, !folder.isEmpty {
+                    Text(folder)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Text(note.displayDate)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var dotColor: Color {
+        guard let c = note.parsedColor else { return .secondary.opacity(0.4) }
+        return Color(red: c.r, green: c.g, blue: c.b)
     }
 }
