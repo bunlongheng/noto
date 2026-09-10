@@ -12,7 +12,7 @@ struct StickiesNativeApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }   // read-mostly app, no New
             CommandGroup(after: .toolbar) {
-                Button("Refresh") { Task { await state.load() } }
+                Button("Refresh") { state.load() }
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Find in Note") { NotificationCenter.default.post(name: .focusFind, object: nil) }
                     .keyboardShortcut("f", modifiers: .command)
@@ -48,7 +48,7 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 420)
-        .task { await state.load() }
+        .task { state.load() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 5) {
@@ -89,9 +89,17 @@ struct RootView: View {
         }
         .overlay(alignment: .bottom) {
             if let toast = state.toast {
-                Text(toast)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    Image(systemName: toast.symbol)
+                        .foregroundStyle(toast.kind == .success ? .green : .orange)
+                    Text(toast.text).lineLimit(2)
+                    if toast.kind == .success, state.canUndoTrash {
+                        Button("Undo") { Task { await state.undoTrash() } }
+                            .buttonStyle(.link)
+                            .keyboardShortcut("z", modifiers: .command)
+                    }
+                }
+                    .font(.callout)
                     .padding(.horizontal, 14).padding(.vertical, 9)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
                     .shadow(radius: 8, y: 3)
@@ -118,7 +126,7 @@ struct NoteListView: View {
                     .clipShape(Capsule())
                 Spacer()
                 if state.isLoading { ProgressView().scaleEffect(0.5) }
-                Button { Task { await state.load() } } label: { Image(systemName: "arrow.clockwise") }
+                Button { state.load() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
             .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6)
@@ -143,7 +151,7 @@ struct NoteListView: View {
 
             Divider()
 
-            if let error = state.error {
+            if let error = state.error, state.notes.isEmpty {
                 message(error, systemImage: "exclamationmark.triangle", retry: true)
             } else if state.isLoading && state.notes.isEmpty {
                 message("Loading notes...", systemImage: nil, retry: false)
@@ -152,6 +160,18 @@ struct NoteListView: View {
             } else if state.visible.isEmpty {
                 message("No match for \"\(state.query)\"", systemImage: "magnifyingglass", retry: false)
             } else {
+                // A failed refresh must not hide notes that are already loaded.
+                if let error = state.error {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text("Refresh failed. \(error)").lineLimit(2)
+                        Spacer()
+                        Button("Retry") { state.load() }.buttonStyle(.link)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 16).padding(.vertical, 6)
+                    .background(.orange.opacity(0.12))
+                }
                 List(state.visible, selection: $state.selected) { note in
                     NoteRow(note: note).tag(note.id)
                 }
@@ -168,7 +188,7 @@ struct NoteListView: View {
             }
             Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 30)
-            if retry { Button("Try again") { Task { await state.load() } } }
+            if retry { Button("Try again") { state.load() } }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -244,7 +244,7 @@ struct NoteDetailView: View {
         .task(id: note.id) {
             content = nil; error = nil; host.clear()
             do {
-                content = try await state.api.fetchNote(id: note.id).content ?? ""
+                content = try await state.body(for: note)
             } catch is CancellationError {
                 // Selection moved on - a superseded load is not an error to show.
             } catch let urlError as URLError where urlError.code == .cancelled {
