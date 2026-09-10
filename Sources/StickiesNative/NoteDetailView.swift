@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WebKit
 
@@ -12,10 +13,7 @@ final class WebHost: ObservableObject {
     @Published var matches = 0
     @Published var current = 0
 
-    private var query = ""
-
     func find(_ q: String) {
-        query = q
         guard let view else { return }
         let js = "window.__snFind(\(jsString(q)))"
         view.evaluateJavaScript(js, in: nil, in: .defaultClient) { [weak self] result in
@@ -37,21 +35,15 @@ final class WebHost: ObservableObject {
     }
 
     func clear() {
-        query = ""
         matches = 0
         current = 0
         view?.evaluateJavaScript("window.__snClear && window.__snClear()", in: nil, in: .defaultClient)
     }
 
-    /// Re-apply after a document loads, so switching notes keeps the active query.
-    func reapply() { if !query.isEmpty { find(query) } }
-
+    /// A JSON string literal is also a valid JavaScript string literal, and unlike
+    /// hand-rolled escaping it cannot miss a control character.
     private func jsString(_ s: String) -> String {
-        let escaped = s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return "\"\(escaped)\""
+        (try? JSONEncoder().encode(s)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
     }
 }
 
@@ -63,7 +55,11 @@ final class WebHost: ObservableObject {
 struct HTMLView: NSViewRepresentable {
     let html: String
     let isHTML: Bool
-    @ObservedObject var host: WebHost
+    /// Deliberately NOT @ObservedObject. This view never reads WebHost's published
+    /// values, and observing them made every find keystroke invalidate the
+    /// representable, which re-ran loadHTMLString below - a reload loop that wiped
+    /// the highlights it had just drawn.
+    let host: WebHost
 
     func makeCoordinator() -> Coordinator { Coordinator(host: host) }
 
@@ -84,16 +80,33 @@ struct HTMLView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        host.view = view
-        context.coordinator.host = host
-        view.loadHTMLString(document, baseURL: URL(string: Config.appBaseURL))
+        // Load ONLY when the document actually changed. updateNSView runs on every
+        // SwiftUI invalidation; reloading unconditionally restarts the page and
+        // throws away find state.
+        let doc = document
+        guard context.coordinator.loadedDocument != doc else { return }
+        context.coordinator.loadedDocument = doc
+        view.loadHTMLString(doc, baseURL: URL(string: Config.appBaseURL))
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var host: WebHost
+        let host: WebHost
+        var loadedDocument: String?
         init(host: WebHost) { self.host = host }
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in host.reapply() }
+
+        /// A note is a document to read, not a browser. Only the initial
+        /// loadHTMLString is allowed in place; a link opens in the default browser
+        /// instead of replacing the note with a remote page where the CSP no
+        /// longer applies and scripts run freely.
+        @MainActor
+        func webView(_ webView: WKWebView,
+                     decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+            guard navigationAction.navigationType != .other else { return .allow }
+            if let url = navigationAction.request.url,
+               url.scheme == "http" || url.scheme == "https" {
+                NSWorkspace.shared.open(url)
+            }
+            return .cancel
         }
     }
 
@@ -196,11 +209,10 @@ struct HTMLView: NSViewRepresentable {
             with: "", options: [.regularExpression, .caseInsensitive])
         out = out.replacingOccurrences(
             of: "<script[^>]*/?>", with: "", options: [.regularExpression, .caseInsensitive])
-        for quote in ["\"", "'"] {
-            out = out.replacingOccurrences(
-                of: "\\son[a-zA-Z]+\\s*=\\s*\(quote)[^\(quote)]*\(quote)",
-                with: "", options: [.regularExpression, .caseInsensitive])
-        }
+        // Quoted, single-quoted, and bare values - the bare form survived before.
+        out = out.replacingOccurrences(
+            of: "\\son[a-zA-Z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)",
+            with: "", options: [.regularExpression, .caseInsensitive])
         return out
     }
 

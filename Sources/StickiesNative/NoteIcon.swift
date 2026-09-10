@@ -7,7 +7,6 @@ import AppKit
 /// exists on macOS, so each is mapped to the closest SF Symbol. Every result is
 /// checked against the running system before use - an unavailable symbol name
 /// renders as nothing, which would leave a blank row.
-@MainActor
 enum NoteIcon {
     private static let fallback = "doc.text.fill"
 
@@ -97,12 +96,13 @@ enum NoteIcon {
         return name
     }
 
-    private static var checked: [String: Bool] = [:]
+    /// Computed once, immutable, therefore Sendable - a mutable static cache was
+    /// a hard error under the Swift 6 language mode the package declares.
+    private static let available: Set<String> = Set(
+        (Array(hero.values) + Array(app.values)).filter {
+            NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil
+        }
+    )
 
-    private static func exists(_ name: String) -> Bool {
-        if let known = checked[name] { return known }
-        let ok = NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
-        checked[name] = ok
-        return ok
-    }
+    private static func exists(_ name: String) -> Bool { available.contains(name) }
 }

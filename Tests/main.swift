@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 import WebKit
 
 // MARK: - Note decoding
@@ -205,5 +206,80 @@ T.check("clearing restores the original text", (restored ?? -1) >= 0)
 
 let none = probe.eval("window.__snFind(\"zzzznotpresent\")") as? Int
 T.equal("a query with no matches reports zero", none ?? -1, 0)
+
+// MARK: - The SwiftUI bridge
+//
+// The JS tests above run the highlighter in a bare WKWebView, which is exactly why
+// they passed while the real feature was broken: HTMLView observed WebHost and
+// reloaded the document on every published change, so each find keystroke restarted
+// the page in a loop and wiped the highlights it had just drawn. These assertions
+// drive find through the actual NSViewRepresentable.
+
+func pump(_ seconds: TimeInterval) {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+}
+
+func pump(until condition: () -> Bool, timeout: TimeInterval = 20) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return true }
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    return condition()
+}
+
+let app = NSApplication.shared
+app.setActivationPolicy(.prohibited)
+
+let bridgeHost = WebHost()
+let bridgeView = HTMLView(html: noteBody, isHTML: true, host: bridgeHost)
+let hosting = NSHostingView(rootView: bridgeView.frame(width: 600, height: 400))
+let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                      styleMask: [.borderless], backing: .buffered, defer: false)
+window.contentView = hosting
+window.orderBack(nil)
+
+let mounted = pump(until: { bridgeHost.view != nil })
+T.check("the representable mounted and handed over its web view", mounted)
+
+let settled = pump(until: { bridgeHost.view?.isLoading == false })
+pump(0.5)
+T.check("the initial document finished loading", settled)
+
+/// Plant a marker in the live page. A reload creates a fresh JS context, so if the
+/// marker is gone afterwards the document was reloaded - which is the bug.
+@MainActor func evalOnPage(_ js: String) -> Any? {
+    guard let web = bridgeHost.view else { return nil }
+    var out: Any?
+    var done = false
+    web.evaluateJavaScript(js, in: nil, in: .defaultClient) { r in
+        out = try? r.get()
+        done = true
+    }
+    _ = pump(until: { done }, timeout: 5)
+    return out
+}
+
+_ = evalOnPage("window.__probe = 'alive'")
+T.equal("the marker is set on the live page", evalOnPage("String(window.__probe)") as? String, "alive")
+
+bridgeHost.find("spam")
+_ = pump(until: { bridgeHost.matches > 0 }, timeout: 5)
+pump(2.0)
+
+T.equal("find through the bridge reports every match", bridgeHost.matches, 3)
+T.equal("find through the bridge starts on the first match", bridgeHost.current, 1)
+T.equal("find does NOT reload the document", evalOnPage("String(window.__probe)") as? String, "alive")
+
+bridgeHost.step(true)
+_ = pump(until: { bridgeHost.current == 2 }, timeout: 5)
+T.equal("stepping advances instead of snapping back to the first match", bridgeHost.current, 2)
+T.equal("stepping does NOT reload the document", evalOnPage("String(window.__probe)") as? String, "alive")
+
+T.equal("the highlights survive in the live document",
+        evalOnPage("document.querySelectorAll('mark.sn-hit').length") as? Int, 3)
 
 T.report()
