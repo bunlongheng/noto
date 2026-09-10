@@ -5,14 +5,28 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege: the job only reads the repo.
+permissions:
+  contents: read
+
+# One run per ref - a new push cancels the previous macOS job.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: macos-14
+    # macos-15 ships Xcode 16, so CI compiles with the same Swift 6 the project
+    # declares. macos-14 defaults to Swift 5.10 and would not gate Swift 6 mode.
+    runs-on: macos-15
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Show toolchain
-        run: swift --version
+        run: |
+          swift --version
+          swift --version 2>&1 | grep -q "version 6" || { echo "expected Swift 6"; exit 1; }
 
       - name: Test
         run: ./test.sh
@@ -20,9 +34,10 @@ jobs:
       - name: Build the app bundle
         run: ./build.sh
 
-      - name: Confirm the binary is universal
+      - name: Confirm the binary is universal and signed
         run: |
           archs=$(lipo -archs StickiesNative)
           echo "archs: $archs"
           echo "$archs" | grep -q arm64
           echo "$archs" | grep -q x86_64
+          codesign --verify --strict StickiesNative.app

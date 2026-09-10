@@ -6,7 +6,8 @@
 # Uses swiftc directly rather than SwiftPM: `swift build` cannot link its manifest
 # on a CommandLineTools-only toolchain, which is the common setup here. Package.swift
 # is kept so the project still opens and builds under full Xcode.
-set -e
+set -euo pipefail
+cd "$(dirname "$0")"
 
 SDK="${SDK:-$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)}"
 APP_NAME="StickiesNative"
@@ -20,7 +21,7 @@ mkdir -p .build
 echo "Building $APP_NAME (arm64 + x86_64)..."
 for ARCH in arm64 x86_64; do
   swiftc -sdk "$SDK" -target "$ARCH-apple-macosx$DEPLOY" \
-    -parse-as-library -O -o ".build/$APP_NAME-$ARCH" $SOURCES
+    -swift-version 6 -parse-as-library -O -o ".build/$APP_NAME-$ARCH" $SOURCES
 done
 lipo -create -output "$APP_NAME" ".build/$APP_NAME-arm64" ".build/$APP_NAME-x86_64"
 echo "Built: ./$APP_NAME ($(lipo -archs "$APP_NAME"))"
@@ -69,8 +70,11 @@ else
   echo "note: no AppIcon.icns, using the default icon"
 fi
 
-# Ad-hoc signature so Gatekeeper allows the local build.
-codesign --force --deep --sign - "$APP_NAME.app" 2>/dev/null && echo "Signed (ad-hoc)"
+# Signature. Ad-hoc by default; set SIGN_IDENTITY for a Developer ID build.
+# Never silenced - a signing failure must fail the build, not print "Created".
+codesign --force --options runtime --timestamp=none --sign "${SIGN_IDENTITY:--}" "$APP_NAME.app"
+codesign --verify --strict "$APP_NAME.app"
+echo "Signed: ${SIGN_IDENTITY:-ad-hoc}"
 echo "Created: ./$APP_NAME.app"
 
 if [ "$1" = "--run" ]; then

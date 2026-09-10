@@ -7,6 +7,7 @@ import AppKit
 /// exists on macOS, so each is mapped to the closest SF Symbol. Every result is
 /// checked against the running system before use - an unavailable symbol name
 /// renders as nothing, which would leave a blank row.
+@MainActor
 enum NoteIcon {
     private static let fallback = "doc.text.fill"
 

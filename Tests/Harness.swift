@@ -23,6 +23,13 @@ enum T {
         check(name, actual == expected, "got \(actual), expected \(expected)")
     }
 
+    /// Run a group of assertions, turning a thrown error into a FAIL line instead
+    /// of a trap. Without this a bad fixture aborts the process before report()
+    /// runs, so nothing is printed and every later suite silently never executes.
+    static func suite(_ name: String, _ body: () throws -> Void) {
+        do { try body() } catch { failures.append("\(name) threw \(error)") }
+    }
+
     static func report() -> Never {
         for f in failures { FileHandle.standardError.write(Data("FAIL  \(f)\n".utf8)) }
         let total = passed + failures.count

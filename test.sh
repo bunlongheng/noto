@@ -4,7 +4,8 @@
 # SwiftPM cannot run on a CommandLineTools-only toolchain (swift build fails to
 # link the manifest), so this compiles the sources and Tests/ with swiftc directly -
 # the same compiler build.sh uses. Identical locally and in CI.
-set -e
+set -euo pipefail
+cd "$(dirname "$0")"
 
 SDK="${SDK:-$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)}"
 TARGET="${TARGET:-arm64-apple-macosx14.0}"
@@ -17,7 +18,7 @@ TESTS=$(find Tests -name "*.swift" | tr '\n' ' ')
 
 mkdir -p .build
 echo "Compiling tests..."
-swiftc -sdk "$SDK" -target "$TARGET" -o "$OUT" $SOURCES $TESTS
+swiftc -sdk "$SDK" -target "$TARGET" -swift-version 6 -o "$OUT" $SOURCES $TESTS
 
 echo "Running tests..."
 "./$OUT"

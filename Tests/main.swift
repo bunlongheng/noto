@@ -9,12 +9,17 @@ let listRow = """
  "folder_color":"#FF9500","updated_at":"2026-09-08T10:16:00.000Z",
  "created_at":"2026-09-08T10:13:00.000Z","type":"html","icon":"__hero:BookOpenIcon"}
 """
-let note = try! JSONDecoder().decode(Note.self, from: Data(listRow.utf8))
-T.equal("decode id", note.id, "abc")
-T.equal("decode snake_case folder_name", note.folderName, "Cheat Sheets")
-T.equal("decode snake_case folder_color", note.folderColor, "#FF9500")
-T.equal("decode snake_case created_at", note.createdAt, "2026-09-08T10:13:00.000Z")
-T.equal("decode icon token", note.icon, "__hero:BookOpenIcon")
+var decoded: Note?
+T.suite("note decoding") {
+    let note = try JSONDecoder().decode(Note.self, from: Data(listRow.utf8))
+    decoded = note
+    T.equal("decode id", note.id, "abc")
+    T.equal("decode snake_case folder_name", note.folderName, "Cheat Sheets")
+    T.equal("decode snake_case folder_color", note.folderColor, "#FF9500")
+    T.equal("decode snake_case created_at", note.createdAt, "2026-09-08T10:13:00.000Z")
+    T.equal("decode icon token", note.icon, "__hero:BookOpenIcon")
+}
+T.check("the decode suite produced a note", decoded != nil)
 
 // The list endpoint omits content entirely - decoding must not fail on that.
 let noContent = #"{"id":"x","title":"t"}"#
@@ -22,7 +27,7 @@ T.check("decode tolerates a row with no content", (try? JSONDecoder().decode(Not
 
 // MARK: - displayDate: the All view is ordered by created_at, so show created_at
 
-T.check("displayDate prefers created_at over updated_at", !note.displayDate.isEmpty)
+T.check("displayDate prefers created_at over updated_at", !(decoded?.displayDate ?? "").isEmpty)
 let onlyUpdated = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
                        updatedAt: "2026-09-08T10:16:00.000Z", createdAt: nil, type: nil, content: nil, icon: nil)
 T.check("displayDate falls back to updated_at", !onlyUpdated.displayDate.isEmpty)

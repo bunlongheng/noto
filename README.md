@@ -103,9 +103,13 @@ CI and exits non-zero on failure.
 
 ## Build notes
 
-`build.sh` produces a universal (arm64 + x86_64) ad-hoc signed bundle.
-`Package.swift` is kept so the project still builds under full Xcode, but `build.sh`
-is the supported path.
+`build.sh` produces a universal (arm64 + x86_64) bundle, compiled in **Swift 6
+language mode** and signed ad-hoc. `Package.swift` is kept so the project also
+builds under full Xcode, but `build.sh` is the supported path.
+
+**Distribution:** local builds are ad-hoc signed, not notarized, so `spctl` rejects
+them. Copying the `.app` to another Mac needs right-click then Open the first time.
+Set `SIGN_IDENTITY` to build with a Developer ID instead.
 
 ## License
 
