@@ -18,6 +18,10 @@ struct StickiesNativeApp: App {
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Search Notes") { NotificationCenter.default.post(name: .focusSearch, object: nil) }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
+                Divider()
+                Button("Move to Trash") { Task { await state.trashSelected() } }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .disabled(state.selectedNote == nil)
             }
         }
     }
@@ -82,7 +86,6 @@ final class AppState: ObservableObject {
 struct RootView: View {
     @EnvironmentObject var state: AppState
     @StateObject private var host = WebHost()
-    @State private var confirmTrash = false
     @State private var find = ""
     @FocusState private var findFocused: Bool
 
@@ -134,20 +137,11 @@ struct RootView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { confirmTrash = true } label: { Image(systemName: "trash") }
+                Button { Task { await state.trashSelected() } } label: { Image(systemName: "trash") }
                     .disabled(state.selectedNote == nil)
-                    .help("Move to TRASH")
+                    .help("Move to TRASH (Cmd+Delete)")
                     .accessibilityLabel("Move note to trash")
             }
-        }
-        .confirmationDialog(
-            "Move \"\(state.selectedNote?.title ?? "")\" to TRASH?",
-            isPresented: $confirmTrash, titleVisibility: .visible
-        ) {
-            Button("Move to TRASH", role: .destructive) { Task { await state.trashSelected() } }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("It stays recoverable in TRASH until the server's 7 day cleanup.")
         }
         .overlay(alignment: .bottom) {
             if let toast = state.toast {
