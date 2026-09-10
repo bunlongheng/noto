@@ -1,123 +1,112 @@
-# StickiesNative
+<div align="center">
 
-## Architecture
+<img src="docs/icon.png" width="104" alt="Stickies Native">
 
-```mermaid
-flowchart TD
-    subgraph UI["SwiftUI Views"]
-        CV["ContentView - split layout"]
-        SB["SidebarView - note list and search"]
-        ED["EditorView - note editor"]
-        TB["ToolbarView - actions and theme"]
-    end
-    AS["AppState - observable store of notes"]
-    AM["AuthManager - Google OAuth, tokens in UserDefaults"]
-    AC["APIClient - Bearer token HTTP client"]
-    EXT["Stickies API on localhost 4444 - /api/stickies/ext"]
-    GD["Image upload - /api/stickies/gdrive to Google Drive"]
+# Stickies Native
 
-    CV --> SB
-    CV --> ED
-    CV --> TB
-    SB --> AS
-    ED --> AS
-    AS -->|fetch create update notes| AC
-    AC -->|GET POST PATCH| EXT
-    AC -->|multipart POST| GD
-    AM -.->|access token| AC
-```
+**A fast, read-only macOS window onto every note in [Stickies](https://github.com/bunlongheng/stickies).**
 
-*Native macOS SwiftUI client: views read from AppState, which drives APIClient calls to the Stickies web API on port 4444, with Google sign-in handled by AuthManager (Google OAuth).*
+List all your notes, search them, open one, and find text inside it.
 
+[![CI](https://github.com/bunlongheng/stickies-native/actions/workflows/ci.yml/badge.svg)](https://github.com/bunlongheng/stickies-native/actions/workflows/ci.yml)
+![Swift 6.0](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)
+![Universal](https://img.shields.io/badge/binary-universal-4B8BBE)
+![Dependencies](https://img.shields.io/badge/dependencies-0-success)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
-A native macOS client for [Stickies](https://github.com/bunlongheng) - a two-pane SwiftUI editor for browsing, writing, and syncing notes stored on the Stickies web app, with rich text, drag-and-drop images, and autosave.
+</div>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Swift](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/UI-SwiftUI%20%2B%20AppKit-0066CC?logo=swift&logoColor=white)
-![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000?logo=apple&logoColor=white)
+---
 
-## Features
+## What it does
 
-- Two-pane window (`NavigationSplitView`) - a searchable note list on the left, a rich text editor on the right.
-- Live search across note title and folder name.
-- Rich text editing via an `NSTextView` bridge: bold, italic, underline, left/center/right alignment, bullet lists, a markdown-table insert, and a font-size menu (12-32pt).
-- Autosave - edits save automatically 3 seconds after you stop typing, plus a manual save with `Cmd+S`; a "Saving..." / "Unsaved" indicator sits in the editor title bar.
-- Drag-and-drop or pasted images are uploaded to the Stickies backend's Google Drive endpoint and swapped inline for an `<img>` tag before the note saves.
-- New Note sheet (title + folder name).
-- Light / Dark / Auto theme, toggled from the sidebar icon or the app's `Theme` menu, persisted with `@AppStorage`.
-- Folder color dot and last-updated timestamp shown per note.
+| | |
+|---|---|
+| **Lists every note** | Pages the API until it is exhausted, in the same order as the web All view |
+| **Search all notes** | Filters title and folder as you type, top left |
+| **Open a note** | HTML notes render with their real styling; anything else as plain text |
+| **Find in note** | Highlights every match with a live counter, top right |
+| **Move to Trash** | Cmd+Delete, the Finder gesture |
 
-## How it works
+## Shortcuts
 
-StickiesNative holds no local note database - it's a thin client over the Stickies web app's REST API. Every note lives on a Stickies server; the app fetches, edits, and writes it back as HTML.
+| Key | Action |
+|---|---|
+| `Cmd` `Shift` `F` | Search all notes |
+| `Cmd` `F` | Find in the open note |
+| `Cmd` `Delete` | Move the selected note to TRASH |
+| `Cmd` `R` | Refresh |
 
-| File | Role |
-|------|------|
-| `App.swift` | Entry point - owns `AppState` (notes, search, loading, selection) and sets the API token on launch |
-| `Views/ContentView.swift` | The split-view shell (sidebar + editor) |
-| `Views/SidebarView.swift` | Search field, note list, new-note sheet, refresh, theme toggle |
-| `Views/EditorView.swift` | Per-note title bar, autosave timer, image-upload pipeline, and the `NSTextView`-backed editor |
-| `Views/ToolbarView.swift` | Formatting commands, applied to the focused `NSTextView` via `NSFontManager` and paragraph styles |
-| `Models/Note.swift` | The `Note` model plus folder-color and date-display helpers |
-| `Models/APIClient.swift` | The only networking code - Bearer-token requests to the Stickies REST API |
-| `Config.swift` | Reads `STICKIES_API_KEY` (env var or `~/.stickies-native.env`) and the Stickies base URL |
-
-Sync flow: on launch the app sets the API token and calls `GET /api/stickies/ext` to list notes, then `GET /api/stickies/ext?id=` to lazy-load a note's content when it's selected. Edits are written back with `PATCH /api/stickies/ext`; new notes with `POST /api/stickies/ext`. Any image dropped or pasted into the editor is uploaded with `POST /api/stickies/gdrive`, and the returned URL replaces the image inline as `<img src="..." style="max-width:100%">` - notes are stored as HTML, the same format the Stickies web app itself uses.
-
-Auth is a single bearer API key, not a sign-in screen - there is no OAuth flow wired up in the current app.
-
-## Tech stack
-
-| Layer | Choice |
-|-------|--------|
-| Language | Swift 6 |
-| UI | SwiftUI (windows, split view, sidebar, forms) + AppKit (`NSTextView` rich-text editing, `NSFontManager`) |
-| Networking | `URLSession` - Bearer-token REST calls and multipart image upload |
-| Build | Swift Package Manager (`Package.swift`, swift-tools-version 6.0) plus a standalone `swiftc` build script |
-| Target | macOS 14+ (Sonoma), arm64 |
-| Local storage | None for notes - only the theme preference is persisted, via `@AppStorage` |
-| License | MIT |
-
-## Getting started
-
-StickiesNative needs a running Stickies backend to talk to (defaults to `http://localhost:4444` in `Config.swift`) and an API key for it.
-
-Create `~/.stickies-native.env`:
-
-```
-STICKIES_API_KEY=sk_ext_your_api_key_here
-```
-
-(or export `STICKIES_API_KEY` as an environment variable instead.)
-
-## Build
-
-Two ways to build, no external package dependencies:
-
-**Swift Package Manager / Xcode**
+## Run it
 
 ```bash
-swift build
-swift run
-# or: open Package.swift to work on it in Xcode
+git clone https://github.com/bunlongheng/stickies-native
+cd stickies-native
+echo 'STICKIES_API_KEY=sk_ext_your_key' > ~/.stickies-native.env
+./build.sh --run
 ```
 
-**Standalone script** (invokes `swiftc` against the Command Line Tools SDK directly and stages a `.app` bundle)
+Requires macOS 14+, the Swift toolchain (Xcode Command Line Tools is enough), and a
+Stickies server reachable at `http://localhost:4444`.
+
+### Configuration
+
+| Variable | Required | Where |
+|---|---|---|
+| `STICKIES_API_KEY` | yes | environment, or `~/.stickies-native.env` |
+
+A missing key shows a setup message rather than crashing.
+
+## Design
+
+**Read-mostly on purpose.** The only write it performs is moving a note to TRASH.
+It never edits note content - an earlier version round-tripped HTML through
+`NSAttributedString` on a 3 second autosave, which silently rewrote hand-authored
+markup. That whole path is gone.
+
+**Trash is a move, not a delete.** `Cmd+Delete` issues the same PATCH the web app
+does - `folder_name: "TRASH"` plus `trashed_at` - so the note stays recoverable
+until the server's own 7 day cleanup. A hard delete is refused for API keys by
+design, server side.
+
+**Notes cannot execute anything.** Note HTML renders under a
+`default-src 'none'` Content Security Policy, and script tags and inline handlers
+are stripped before loading. The find highlighter runs in an isolated
+`WKContentWorld`, which the CSP does not apply to - so it works while note scripts
+stay blocked. Both halves are covered by tests.
+
+## Layout
+
+```
+Sources/StickiesNative/
+  App.swift            @main scene, menu commands, split view, toolbar
+  AppState.swift       observable state: notes, selection, filter, toast
+  Config.swift         API key resolution
+  NoteIcon.swift       Heroicon / app tokens to SF Symbols
+  NoteDetailView.swift WKWebView renderer, CSP, find highlighter
+  Models/Note.swift    Codable model and formatting
+  Models/APIClient.swift  read-only client, paging, trash
+Tests/                 assertions, run by ./test.sh
+```
+
+## Tests
 
 ```bash
-./build.sh          # produces ./StickiesNative and ./StickiesNative.app
-./build.sh --run    # build and launch
+./test.sh
 ```
 
-`build.sh` also writes the `Info.plist` for the bundle (`com.bheng.stickies-native`, minimum macOS 14.0).
+Compiles the sources and `Tests/` with `swiftc` and runs them. SwiftPM is not used:
+`swift build` fails to link its manifest on a CommandLineTools-only toolchain, so
+XCTest and swift-testing are unavailable there. This runs identically locally and in
+CI and exits non-zero on failure.
+
+## Build notes
+
+`build.sh` produces a universal (arm64 + x86_64) ad-hoc signed bundle.
+`Package.swift` is kept so the project still builds under full Xcode, but `build.sh`
+is the supported path.
 
 ## License
 
 MIT - see [LICENSE](LICENSE).
-
----
-
-<p align="center">
-  <sub>Built by <a href="https://bunlongheng.com">Bunlong Heng</a> &middot; <a href="https://bunlongheng.com/projects/stickies-mobile-demo">See it in my portfolio &rarr;</a></sub>
-</p>

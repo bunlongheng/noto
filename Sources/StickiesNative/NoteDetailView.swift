@@ -18,7 +18,8 @@ final class WebHost: ObservableObject {
         query = q
         guard let view else { return }
         let js = "window.__snFind(\(jsString(q)))"
-        view.evaluateJavaScript(js) { [weak self] result, _ in
+        view.evaluateJavaScript(js, in: nil, in: .defaultClient) { [weak self] result in
+            let result = try? result.get()
             Task { @MainActor in
                 let n = (result as? Int) ?? 0
                 self?.matches = n
@@ -29,8 +30,9 @@ final class WebHost: ObservableObject {
 
     func step(_ forward: Bool) {
         guard let view, matches > 0 else { return }
-        view.evaluateJavaScript("window.__snStep(\(forward ? 1 : -1))") { [weak self] result, _ in
-            Task { @MainActor in self?.current = (result as? Int) ?? 0 }
+        view.evaluateJavaScript("window.__snStep(\(forward ? 1 : -1))", in: nil, in: .defaultClient) { [weak self] result in
+            let value = try? result.get()
+            Task { @MainActor in self?.current = (value as? Int) ?? 0 }
         }
     }
 
@@ -38,7 +40,7 @@ final class WebHost: ObservableObject {
         query = ""
         matches = 0
         current = 0
-        view?.evaluateJavaScript("window.__snClear && window.__snClear()")
+        view?.evaluateJavaScript("window.__snClear && window.__snClear()", in: nil, in: .defaultClient)
     }
 
     /// Re-apply after a document loads, so switching notes keeps the active query.
@@ -66,7 +68,16 @@ struct HTMLView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(host: host) }
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let config = WKWebViewConfiguration()
+        // The highlighter lives in an ISOLATED content world, so the CSP below can
+        // block every script the note carries without disabling our own.
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.finder,
+                         injectionTime: .atDocumentEnd,
+                         forMainFrameOnly: true,
+                         in: .defaultClient)
+        )
+        let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         host.view = view
         return view
@@ -87,10 +98,14 @@ struct HTMLView: NSViewRepresentable {
     }
 
     private var document: String {
-        let body = isHTML ? stripScripts(html) : "<pre class=\"plain\">\(escaped(html))</pre>"
+        let body = isHTML ? Self.stripScripts(html) : "<pre class=\"plain\">\(escaped(html))</pre>"
         return """
         <!doctype html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <!-- Blocks every script and network fetch the note carries. CSP does not
+             apply to isolated content worlds, so the find highlighter still runs. -->
+        <meta http-equiv="Content-Security-Policy"
+              content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:">
         <style>
           /* Notes are authored light-theme only (the /html skill enforces it) and set
              colours on their own elements. Declaring "light dark" let macOS dark mode
@@ -106,14 +121,12 @@ struct HTMLView: NSViewRepresentable {
           pre.plain { white-space:pre-wrap; word-wrap:break-word; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
           mark.sn-hit { background:#ffe066; color:#000; border-radius:2px; padding:0 1px; }
           mark.sn-hit.sn-cur { background:#ff9500; box-shadow:0 0 0 2px rgba(255,149,0,.45); }
-        </style></head><body>\(body)
-        <script>\(finder)</script>
-        </body></html>
+        </style></head><body>\(body)</body></html>
         """
     }
 
     /// Wraps every match in a <mark>, tracks the current one, scrolls it into view.
-    private var finder: String {
+    static let finder: String = {
         """
         (function(){
           var hits = [], cur = -1;
@@ -172,19 +185,22 @@ struct HTMLView: NSViewRepresentable {
           }
         })();
         """
-    }
+    }()
 
-    /// Remove note-supplied scripts and inline handlers before rendering.
-    private func stripScripts(_ s: String) -> String {
+    /// Secondary guard. The CSP above already stops a note's scripts from RUNNING;
+    /// this stops their source text from sitting in the DOM, where it leaks into
+    /// textContent, copy-paste and assistive tech.
+    static func stripScripts(_ s: String) -> String {
         var out = s.replacingOccurrences(
             of: "<script[^>]*>[\\s\\S]*?</script>",
             with: "", options: [.regularExpression, .caseInsensitive])
         out = out.replacingOccurrences(
-            of: "\\son[a-zA-Z]+\\s*=\\s*\"[^\"]*\"",
-            with: "", options: [.regularExpression, .caseInsensitive])
-        out = out.replacingOccurrences(
-            of: "\\son[a-zA-Z]+\\s*=\\s*'[^']*'",
-            with: "", options: [.regularExpression, .caseInsensitive])
+            of: "<script[^>]*/?>", with: "", options: [.regularExpression, .caseInsensitive])
+        for quote in ["\"", "'"] {
+            out = out.replacingOccurrences(
+                of: "\\son[a-zA-Z]+\\s*=\\s*\(quote)[^\(quote)]*\(quote)",
+                with: "", options: [.regularExpression, .caseInsensitive])
+        }
         return out
     }
 
