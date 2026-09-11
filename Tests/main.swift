@@ -245,8 +245,25 @@ window.orderBack(nil)
 let mounted = pump(until: { bridgeHost.view != nil })
 T.check("the representable mounted and handed over its web view", mounted)
 
-let settled = pump(until: { bridgeHost.view?.isLoading == false })
-pump(0.5)
+// Wait for the note's own text to be in the DOM. `isLoading == false` is already
+// true before the first load begins, so on a slower machine that check passed
+// immediately, the marker below landed on about:blank, and the real load then
+// wiped it - which is exactly how this failed in CI while passing locally.
+let settled = pump(until: {
+    guard let web = bridgeHost.view, !web.isLoading else { return false }
+    var seen = false
+    var done = false
+    web.evaluateJavaScript("document.body.innerText.indexOf('The spam fix shipped') >= 0",
+                           in: nil, in: .defaultClient) { r in
+        seen = ((try? r.get()) as? Bool) ?? false
+        done = true
+    }
+    let deadline = Date().addingTimeInterval(2)
+    while !done && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    return seen
+}, timeout: 30)
 T.check("the initial document finished loading", settled)
 
 /// Plant a marker in the live page. A reload creates a fresh JS context, so if the
