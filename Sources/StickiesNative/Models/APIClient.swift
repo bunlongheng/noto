@@ -1,157 +1,117 @@
 import Foundation
-import AppKit
-
-final class APIClient: @unchecked Sendable {
-    private let baseURL = Config.appBaseURL
-    private var token: String?
-
-    func setToken(_ token: String?) {
-        self.token = token
-    }
-
-    private func makeRequest(path: String, method: String = "GET", body: Data? = nil, contentType: String = "application/json") async throws -> Data {
-        guard let token else {
-            throw APIError.notAuthenticated
-        }
-
-        guard let url = URL(string: "\(baseURL)\(path)") else {
-            throw APIError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-
-        if let body {
-            request.httpBody = body
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-
-        if httpResponse.statusCode == 401 {
-            throw APIError.notAuthenticated
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw APIError.httpError(statusCode: httpResponse.statusCode, message: body)
-        }
-
-        return data
-    }
-
-    func fetchNotes(limit: Int = 50) async throws -> [Note] {
-        let data = try await makeRequest(path: "/api/stickies/ext?limit=\(limit)")
-        let response = try JSONDecoder().decode(NotesResponse.self, from: data)
-        return response.notes
-    }
-
-    func fetchNote(id: String) async throws -> Note {
-        let data = try await makeRequest(path: "/api/stickies/ext?id=\(id)")
-        let response = try JSONDecoder().decode(SingleNoteResponse.self, from: data)
-        return response.note
-    }
-
-    func updateNote(id: String, content: String, type: String = "html") async throws {
-        let payload: [String: String] = ["id": id, "content": content, "type": type]
-        let body = try JSONEncoder().encode(payload)
-        _ = try await makeRequest(path: "/api/stickies/ext", method: "PATCH", body: body)
-    }
-
-    func createNote(title: String, content: String, folderName: String, type: String = "html") async throws -> Note {
-        let payload: [String: String] = [
-            "title": title,
-            "content": content,
-            "folder_name": folderName,
-            "type": type
-        ]
-        let body = try JSONEncoder().encode(payload)
-        let data = try await makeRequest(path: "/api/stickies/ext", method: "POST", body: body)
-
-        if let response = try? JSONDecoder().decode(SingleNoteResponse.self, from: data) {
-            return response.note
-        }
-
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let id = json?["id"] as? String ?? UUID().uuidString
-        return Note(
-            id: id,
-            title: title,
-            content: content,
-            folderName: folderName,
-            folderColor: nil,
-            updatedAt: ISO8601DateFormatter().string(from: Date()),
-            type: type
-        )
-    }
-
-    /// Upload an image file to Google Drive via the Stickies API
-    func uploadImage(imageData: Data, filename: String, folder: String = "native") async throws -> String {
-        guard let token else { throw APIError.notAuthenticated }
-
-        let boundary = UUID().uuidString
-        var body = Data()
-
-        // File field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
-        body.append(imageData)
-        body.append("\r\n".data(using: .utf8)!)
-
-        // Folder field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"folder\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(folder)\r\n".data(using: .utf8)!)
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-
-        guard let url = URL(string: "\(baseURL)/api/stickies/gdrive") else {
-            throw APIError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw APIError.httpError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: "Upload failed")
-        }
-
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let imageUrl = json?["url"] as? String else {
-            throw APIError.invalidResponse
-        }
-
-        return imageUrl
-    }
-}
 
 enum APIError: LocalizedError {
-    case invalidURL
-    case invalidResponse
-    case notAuthenticated
-    case httpError(statusCode: Int, message: String)
+    case noKey
+    case badStatus(Int)
+    case forbidden
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL:
-            return "Invalid URL"
-        case .invalidResponse:
-            return "Invalid response from server"
-        case .notAuthenticated:
-            return "Not authenticated - please sign in"
-        case .httpError(let code, let message):
-            return "HTTP \(code): \(message)"
+        case .noKey:
+            return "No API key. Add STICKIES_API_KEY to ~/.stickies-native.env"
+        case .badStatus(let code):
+            return code == 401 ? "Key rejected (401)" : "Server returned HTTP \(code)"
+        case .forbidden:
+            return "The server refused this change (403)"
         }
+    }
+}
+
+/// Client for the Stickies ext API. Read-mostly: list, fetch one by id, and a
+/// single soft-delete PATCH that moves a note to TRASH.
+struct APIClient {
+    private let pageSize = 100
+    private let hardCap = 10_000   // stop runaway paging if the server ever misbehaves
+
+    /// Every note, paged until the server stops returning full pages.
+    ///
+    /// `onPage` is called with the running total after each page, so the list can
+    /// render the first 100 notes in about 150ms instead of staying blank for the
+    /// ~2.6s the full crawl takes. A page that fails keeps everything already
+    /// fetched rather than discarding the whole crawl.
+    func fetchAllNotes(onPage: (@MainActor ([Note], Int?) -> Void)? = nil) async throws -> [Note] {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        var all: [Note] = []
+        var offset = 0
+        var total: Int?
+
+        while all.count < hardCap {
+            let path = "/api/stickies/ext?recent=all&limit=\(pageSize)&offset=\(offset)"
+            guard let url = URL(string: Config.appBaseURL + path) else { break }
+
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 20
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+            guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+
+            let decoded = try JSONDecoder().decode(NotesResponse.self, from: data)
+            total = decoded.total ?? total
+            all.append(contentsOf: decoded.notes)
+            if let onPage {
+                let snapshot = all
+                let count = total
+                await MainActor.run { onPage(snapshot, count) }
+            }
+            if decoded.notes.count < pageSize { break }   // short page = last page
+            offset += pageSize
+            try Task.checkCancellation()
+        }
+        // Server order is created_at DESC (the web All view). Never re-sort here.
+        return all
+    }
+
+    /// One note WITH its body. The list endpoint omits content, so this runs only
+    /// when a row is selected.
+    func fetchNote(id: String) async throws -> Note {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url = URL(string: Config.appBaseURL + "/api/stickies/ext?id=" + id) else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(SingleNoteResponse.self, from: data).note
+    }
+
+    /// Put a note back where it was. The inverse of `trash`.
+    func restore(id: String, toFolder folder: String?) async throws {
+        try await patch(["id": id, "folder_name": folder ?? "", "trashed_at": ""])
+    }
+
+    /// Move a note to TRASH - the same soft delete the web app performs
+    /// (app/(app)/page.tsx:2613). A hard DELETE is refused for API keys by design
+    /// (app/api/stickies/route.ts:1066), and trashed notes are purged by the
+    /// server's own 7 day expiry, so nothing is destroyed here.
+    func trash(id: String) async throws {
+        try await patch([
+            "id": id,
+            "folder_name": "TRASH",
+            "trashed_at": ISO8601DateFormatter().string(from: Date()),
+        ])
+    }
+
+    private func patch(_ payload: [String: String]) async throws {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url = URL(string: Config.appBaseURL + "/api/stickies/ext") else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+        request.timeoutInterval = 20
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        if http.statusCode == 403 { throw APIError.forbidden }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
     }
 }
