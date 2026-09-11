@@ -77,7 +77,7 @@ codesign --verify --strict "$APP_NAME.app"
 echo "Signed: ${SIGN_IDENTITY:-ad-hoc}"
 echo "Created: ./$APP_NAME.app"
 
-if [ "$1" = "--run" ]; then
+if [ "${1:-}" = "--run" ]; then
   echo "Launching..."
   open "$APP_NAME.app"
 fi
