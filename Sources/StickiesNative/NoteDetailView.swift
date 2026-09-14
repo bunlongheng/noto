@@ -10,6 +10,11 @@ import WebKit
 @MainActor
 final class WebHost: ObservableObject {
     weak var view: WKWebView?
+    /// The toolbar's find field. Held so Cmd+F can put the caret in it: SwiftUI's
+    /// @FocusState does not reach toolbar content, which is hosted in its own view
+    /// tree, and a SwiftUI TextField there is not an NSTextField that can be found
+    /// by walking the window either.
+    weak var findField: NSSearchField?
     @Published var matches = 0
     @Published var current = 0
     /// Page zoom, kept here rather than on the web view so it survives switching
@@ -54,10 +59,64 @@ final class WebHost: ObservableObject {
         view?.evaluateJavaScript("window.__snClear && window.__snClear()", in: nil, in: .defaultClient)
     }
 
+    /// Put the caret in the find field. False when there is no field to focus,
+    /// so the caller can leave the key to whatever else wants it.
+    @discardableResult
+    func focusFind() -> Bool {
+        guard let findField, let window = findField.window else { return false }
+        return window.makeFirstResponder(findField)
+    }
+
     /// A JSON string literal is also a valid JavaScript string literal, and unlike
     /// hand-rolled escaping it cannot miss a control character.
     private func jsString(_ s: String) -> String {
         (try? JSONEncoder().encode(s)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+    }
+}
+
+/// A real NSSearchField for the toolbar.
+///
+/// SwiftUI's TextField cannot be focused programmatically from a toolbar item, so
+/// the one control the app needs to drive from a keyboard shortcut is built in
+/// AppKit, where making it first responder is a single call.
+struct FindField: NSViewRepresentable {
+    @Binding var text: String
+    let host: WebHost
+    let onSubmit: () -> Void
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = "Find in note"
+        field.font = .systemFont(ofSize: 12)
+        field.delegate = context.coordinator
+        field.sendsWholeSearchString = false
+        field.sendsSearchStringImmediately = true
+        host.findField = field
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        // Only when it actually differs - assigning while the user types would
+        // reset the insertion point to the end on every keystroke.
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        private let parent: FindField
+        init(_ parent: FindField) { self.parent = parent }
+
+        func controlTextDidChange(_ note: Notification) {
+            guard let field = note.object as? NSSearchField else { return }
+            parent.text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+            parent.onSubmit()
+            return true
+        }
     }
 }
 
@@ -277,5 +336,4 @@ struct NoteDetailView: View {
 
 extension Notification.Name {
     static let focusFind = Notification.Name("focusFind")
-    static let focusSearch = Notification.Name("focusSearch")
 }

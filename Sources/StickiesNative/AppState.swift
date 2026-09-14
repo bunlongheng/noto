@@ -24,6 +24,9 @@ final class AppState: ObservableObject {
     @Published var query = "" { didSet { refilter() } }
     @Published var selected: Note.ID?
     @Published var toast: Toast?
+    /// The centred search palette. Lives here rather than in RootView so the menu
+    /// command can open it too.
+    @Published var paletteOpen = false
     @Published var loadedCount: Int?
 
     /// Recomputed only when notes or the query change. As a computed property this
