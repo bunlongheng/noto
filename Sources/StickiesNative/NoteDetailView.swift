@@ -12,6 +12,20 @@ final class WebHost: ObservableObject {
     weak var view: WKWebView?
     @Published var matches = 0
     @Published var current = 0
+    /// Page zoom, kept here rather than on the web view so it survives switching
+    /// notes - the web view is reused, but a fresh load would otherwise be the
+    /// only thing carrying it.
+    @Published private(set) var zoom: CGFloat = 1
+
+    func zoomBy(_ delta: CGFloat) {
+        zoom = min(3, max(0.5, zoom + delta))
+        view?.pageZoom = zoom
+    }
+
+    func resetZoom() {
+        zoom = 1
+        view?.pageZoom = 1
+    }
 
     func find(_ q: String) {
         guard let view else { return }
@@ -86,6 +100,7 @@ struct HTMLView: NSViewRepresentable {
         let doc = document
         guard context.coordinator.loadedDocument != doc else { return }
         context.coordinator.loadedDocument = doc
+        view.pageZoom = host.zoom
         view.loadHTMLString(doc, baseURL: URL(string: Config.appBaseURL))
     }
 

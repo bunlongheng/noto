@@ -10,7 +10,6 @@ import SwiftUI
 /// notes one at a time, the way the web app does.
 struct TabBarView: View {
     @EnvironmentObject var state: AppState
-    @State private var keyMonitor: Any?
 
     private let h: CGFloat = 26
 
@@ -38,11 +37,6 @@ struct TabBarView: View {
         }
         .frame(height: h + 6)
         .background(Color.secondary.opacity(0.16))
-        .onAppear(perform: watchArrowKeys)
-        .onDisappear {
-            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-            keyMonitor = nil
-        }
     }
 
     /// < ALL (n) > - the same trailing control the web strip carries.
@@ -68,26 +62,6 @@ struct TabBarView: View {
         .disabled(state.tabs.count < 2)
         .help(help)
         .accessibilityLabel(help)
-    }
-
-    /// Plain ← / → step through the notes, but only when nothing is being typed
-    /// into - otherwise the arrows would stop moving the caret in the search and
-    /// find fields. A local monitor sees the key before the web view does, which
-    /// is what makes this work while the note itself has focus.
-    private func watchArrowKeys() {
-        guard keyMonitor == nil else { return }
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // macOS stamps every arrow key with .function and .numericPad, so an
-            // "is empty" test on the flags never matches. Only the real modifiers
-            // disqualify it - Cmd+← is Back, Shift+← is a selection.
-            let held: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
-            guard event.modifierFlags.intersection(held).isEmpty,
-                  event.keyCode == 123 || event.keyCode == 124 else { return event }
-            if let responder = event.window?.firstResponder,
-               responder is NSTextView || responder is NSTextField { return event }
-            Task { @MainActor in state.stepTab(event.keyCode == 123 ? -1 : 1) }
-            return nil
-        }
     }
 
     @ViewBuilder
