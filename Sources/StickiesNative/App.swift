@@ -20,7 +20,7 @@ struct StickiesNativeApp: App {
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Find in Note") { NotificationCenter.default.post(name: .focusFind, object: nil) }
                     .keyboardShortcut("f", modifiers: .command)
-                Button("Search Notes") { NotificationCenter.default.post(name: .focusSearch, object: nil) }
+                Button("Search All Notes") { state.paletteOpen = true }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                 Divider()
                 Button("Zoom In") { host.zoomBy(0.1) }
@@ -52,7 +52,6 @@ struct RootView: View {
     @EnvironmentObject var host: WebHost
     @State private var find = ""
     @State private var keyMonitor: Any?
-    @FocusState private var findFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -85,13 +84,8 @@ struct RootView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 5) {
-                    Image(systemName: "text.magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                    TextField("Find in note", text: $find)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .frame(width: 150)
-                        .focused($findFocused)
-                        .onSubmit { host.step(true) }
+                    FindField(text: $find, host: host) { host.step(true) }
+                        .frame(width: 170, height: 22)
                         .onChange(of: find) { _, new in host.find(new) }
                     if !find.isEmpty {
                         Text(host.matches == 0 ? "none" : "\(host.current)/\(host.matches)")
@@ -110,7 +104,7 @@ struct RootView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .disabled(state.selectedNote == nil)
                 .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in
-                    if state.selectedNote != nil { findFocused = true }
+                    if state.selectedNote != nil { host.focusFind() }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
@@ -141,6 +135,10 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state.toast)
+        .overlay {
+            if state.paletteOpen { SearchPaletteView().transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.12), value: state.paletteOpen)
     }
 
     /// Keys the menu cannot carry on its own.
@@ -157,6 +155,24 @@ struct RootView: View {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            // The palette handles its own keys; stepping tabs behind it would move
+            // the selection out from under the result the user is aiming at.
+            if state.paletteOpen, flags.isEmpty { return event }
+
+            // Cmd+Shift+F opens the palette, Cmd+F focuses the find field. keyCode 3
+            // is F. The menu item alone was not enough for find: setting @FocusState
+            // from the menu action left focus on the web view, so the caret never
+            // arrived and whatever was typed next went nowhere. Resigning first
+            // responder here is what actually frees it up.
+            if event.keyCode == 3, flags == .command || flags == [.command, .shift] {
+                if flags.contains(.shift) {
+                    state.paletteOpen = true
+                } else {
+                    guard state.selectedNote != nil else { return event }
+                    host.focusFind()
+                }
+                return nil
+            }
 
             if flags == .command || flags == [.command, .shift] {
                 switch event.charactersIgnoringModifiers {
@@ -189,7 +205,6 @@ struct RootView: View {
 
 struct NoteListView: View {
     @EnvironmentObject var state: AppState
-    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -212,7 +227,6 @@ struct NoteListView: View {
                 TextField("Search all notes", text: $state.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .focused($searchFocused)
                 if !state.query.isEmpty {
                     Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
                         .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
@@ -223,7 +237,6 @@ struct NoteListView: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-            .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
 
             Divider()
 

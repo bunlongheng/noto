@@ -27,6 +27,16 @@ lipo -create -output "$APP_NAME" ".build/$APP_NAME-arm64" ".build/$APP_NAME-x86_
 echo "Built: ./$APP_NAME ($(lipo -archs "$APP_NAME"))"
 
 APP_DIR="$APP_NAME.app/Contents/MacOS"
+
+# Overwriting the binary of a RUNNING copy invalidates its signed pages, and the
+# kernel then kills the process with SIGKILL (Code Signature Invalid) the moment
+# it faults in a new one - it reads as a random crash while you are using the app.
+if pgrep -f "$APP_NAME.app/Contents/MacOS/$APP_NAME" > /dev/null; then
+  echo "note: quitting the running $APP_NAME before replacing it"
+  pkill -f "$APP_NAME.app/Contents/MacOS/$APP_NAME"
+  sleep 1
+fi
+
 mkdir -p "$APP_DIR"
 cp "$APP_NAME" "$APP_DIR/"
 
