@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct StickiesNativeApp: App {
+struct NotoApp: App {
     @StateObject private var state = AppState()
     // Owned here, not in RootView, so the Zoom menu items can drive the same
     // web view the note is rendered in.

@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="docs/icon.png" width="104" alt="Stickies Native">
+<img src="docs/icon.png" width="104" alt="Noto">
 
-# Stickies Native
+# Noto
 
 **A fast, read-only macOS window onto every note in [Stickies](https://github.com/bunlongheng/stickies).**
+
+*Noto - ノート - notes.*
 
 List all your notes, search them, open one, and find text inside it.
 
@@ -43,7 +45,7 @@ List all your notes, search them, open one, and find text inside it.
 ```bash
 git clone https://github.com/bunlongheng/stickies-native
 cd stickies-native
-echo 'STICKIES_API_KEY=sk_ext_your_key' > ~/.stickies-native.env
+echo 'STICKIES_API_KEY=sk_ext_your_key' > ~/.noto.env
 ./build.sh --run
 ```
 
@@ -54,7 +56,7 @@ Stickies server reachable at `http://localhost:4444`.
 
 | Variable | Required | Where |
 |---|---|---|
-| `STICKIES_API_KEY` | yes | environment, or `~/.stickies-native.env` |
+| `STICKIES_API_KEY` | yes | environment, or `~/.noto.env` (`~/.stickies-native.env` still works) |
 
 A missing key shows a setup message rather than crashing.
 
@@ -79,7 +81,7 @@ stay blocked. Both halves are covered by tests.
 ## Layout
 
 ```
-Sources/StickiesNative/
+Sources/Noto/
   App.swift            @main scene, menu commands, split view, toolbar
   AppState.swift       observable state: notes, selection, filter, toast
   Config.swift         API key resolution
