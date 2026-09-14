@@ -8,7 +8,7 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noKey:
-            return "No API key. Add STICKIES_API_KEY to ~/.stickies-native.env"
+            return "No API key. Add STICKIES_API_KEY to ~/.noto.env"
         case .badStatus(let code):
             return code == 401 ? "Key rejected (401)" : "Server returned HTTP \(code)"
         case .forbidden:
