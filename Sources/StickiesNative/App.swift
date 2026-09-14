@@ -19,6 +19,14 @@ struct StickiesNativeApp: App {
                 Button("Search Notes") { NotificationCenter.default.post(name: .focusSearch, object: nil) }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                 Divider()
+                Button("Next Tab") { state.stepTab(1) }
+                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Previous Tab") { state.stepTab(-1) }
+                    .keyboardShortcut("[", modifiers: [.command, .shift])
+                Button("Close Tab") { if let id = state.selected { state.closeTab(id) } }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
+                    .disabled(state.selected == nil)
+                Divider()
                 Button("Move to Trash") { Task { await state.trashSelected() } }
                     .keyboardShortcut(.delete, modifiers: .command)
                     .disabled(state.selectedNote == nil)
@@ -39,8 +47,13 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
         } detail: {
             if let note = state.selectedNote {
-                NoteDetailView(note: note, host: host)
-                    .onChange(of: note.id) { _, _ in find = "" }
+                VStack(spacing: 0) {
+                    // Above the note, not inside it: full screen hides the sidebar,
+                    // and this is what keeps every other note one click away.
+                    TabBarView()
+                    NoteDetailView(note: note, host: host)
+                        .onChange(of: note.id) { _, _ in find = "" }
+                }
             } else {
                 Text("Select a note")
                     .foregroundStyle(.secondary)
