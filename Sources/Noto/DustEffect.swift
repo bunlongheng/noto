@@ -186,7 +186,7 @@ enum Dust {
         let c = CAEmitterCell()
         c.contents = speck
         c.color = color
-        c.birthRate = 1400
+        c.birthRate = 5200
         c.lifetime = 1.1
         c.lifetimeRange = 0.4
         c.velocity = 60
@@ -195,9 +195,9 @@ enum Dust {
         c.emissionRange = .pi / 2.6
         c.yAcceleration = 45
         c.xAcceleration = 45
-        c.scale = 0.95
-        c.scaleRange = 0.5
-        c.scaleSpeed = -0.35
+        c.scale = 0.17
+        c.scaleRange = 0.1
+        c.scaleSpeed = -0.06
         c.alphaSpeed = -0.85
         c.spin = 1.2
         c.spinRange = 2.6
