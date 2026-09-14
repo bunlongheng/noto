@@ -3,10 +3,15 @@ import Foundation
 enum Config {
     static let appBaseURL = "http://localhost:4444"
 
-    /// The Stickies ext API key, or nil when it is not configured.
+    /// The notes endpoint on the server. Spelled once here because it is the
+    /// SERVER's route name, not this app's - it stays "stickies" no matter what
+    /// this app is called.
+    static let notesPath = "/api/stickies/ext"
+
+    /// The Noto API key, or nil when it is not configured.
     /// Returns nil rather than calling fatalError so a missing key shows a setup
     /// message instead of crashing the app on launch.
-    static let apiKey: String? = readEnv("STICKIES_API_KEY")
+    static let apiKey: String? = readEnv("NOTO_API_KEY")
 
     private static func readEnv(_ key: String) -> String? {
         if let val = ProcessInfo.processInfo.environment[key], !val.isEmpty { return val }

@@ -4,11 +4,11 @@
 
 # Noto
 
-**A fast, read-only macOS window onto every note in [Stickies](https://github.com/bunlongheng/stickies).**
+**A fast native macOS window onto every note you own.**
 
 *Noto - ノート - notes.*
 
-List all your notes, search them, open one, and find text inside it.
+List all your notes, search titles and text, open one, find inside it, and write a new one.
 
 [![CI](https://github.com/bunlongheng/noto/actions/workflows/ci.yml/badge.svg)](https://github.com/bunlongheng/noto/actions/workflows/ci.yml)
 ![Swift 6.0](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)
@@ -26,7 +26,9 @@ List all your notes, search them, open one, and find text inside it.
 | | |
 |---|---|
 | **Lists every note** | Pages the API until it is exhausted, in the same order as the web All view |
-| **Search all notes** | Filters title and folder as you type, top left |
+| **Filter the list** | The sidebar field narrows the loaded list by title and folder, as you type |
+| **Search all notes** | `Cmd+Shift+F` matches titles locally and note TEXT on the server |
+| **New note** | `Cmd+N` writes a plain-text note |
 | **Open a note** | HTML notes render with their real styling; anything else as plain text |
 | **Find in note** | Highlights every match with a live counter, top right |
 | **Move to Trash** | Cmd+Delete, the Finder gesture |
@@ -35,7 +37,8 @@ List all your notes, search them, open one, and find text inside it.
 
 | Key | Action |
 |---|---|
-| `Cmd` `Shift` `F` | Search all notes |
+| `Cmd` `Shift` `F` | Search all notes, titles and text |
+| `Cmd` `N` | New plain-text note |
 | `Cmd` `F` | Find in the open note |
 | `Cmd` `Delete` | Move the selected note to TRASH |
 | `Cmd` `R` | Refresh |
@@ -45,24 +48,30 @@ List all your notes, search them, open one, and find text inside it.
 ```bash
 git clone https://github.com/bunlongheng/noto
 cd noto
-echo 'STICKIES_API_KEY=sk_ext_your_key' > ~/.noto.env
-./build.sh --run
+echo 'NOTO_API_KEY=sk_ext_your_key' > ~/.noto.env
+./build.sh --install   # into /Applications, then launch it
 ```
 
-Requires macOS 14+, the Swift toolchain (Xcode Command Line Tools is enough), and a
-Stickies server reachable at `http://localhost:4444`.
+`--run` builds and launches in place. `--install` copies the bundle to
+`/Applications` so Launchpad, Spotlight and the Dock can open it; every later
+`./build.sh` refreshes that installed copy automatically.
+
+Requires macOS 14+, the Swift toolchain (Xcode Command Line Tools is enough), and the
+notes server ([bunlongheng/stickies](https://github.com/bunlongheng/stickies)) reachable
+at `http://localhost:4444`.
 
 ### Configuration
 
 | Variable | Required | Where |
 |---|---|---|
-| `STICKIES_API_KEY` | yes | environment, or `~/.noto.env` |
+| `NOTO_API_KEY` | yes | environment, or `~/.noto.env` |
 
 A missing key shows a setup message rather than crashing.
 
 ## Design
 
-**Read-mostly on purpose.** The only write it performs is moving a note to TRASH.
+**Read-mostly on purpose.** It writes exactly twice: a new plain-text note, and
+moving a note to TRASH.
 It never edits note content - an earlier version round-tripped HTML through
 `NSAttributedString` on a 3 second autosave, which silently rewrote hand-authored
 markup. That whole path is gone.

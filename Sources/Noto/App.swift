@@ -14,7 +14,10 @@ struct NotoApp: App {
         }
         .defaultSize(width: 1100, height: 780)
         .commands {
-            CommandGroup(replacing: .newItem) { }   // read-mostly app, no New
+            CommandGroup(replacing: .newItem) {
+                Button("New Note") { state.composerOpen = true }
+                    .keyboardShortcut("n", modifiers: .command)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { state.load() }
                     .keyboardShortcut("r", modifiers: .command)
@@ -39,9 +42,9 @@ struct NotoApp: App {
                     .keyboardShortcut("w", modifiers: [.command, .shift])
                     .disabled(state.selected == nil)
                 Divider()
-                Button("Move to Trash") { Task { await state.trashSelected() } }
+                Button("Move to Trash") { Dust.dissolve(over: host.view) { await state.trashSelected() } }
                     .keyboardShortcut(.delete, modifiers: .command)
-                    .disabled(state.selectedNote == nil)
+                    .disabled(state.selectedNote == nil || state.selectedNote?.frozen == true)
             }
         }
     }
@@ -52,6 +55,7 @@ struct RootView: View {
     @EnvironmentObject var host: WebHost
     @State private var find = ""
     @State private var keyMonitor: Any?
+    @State private var confirmingTrash = false
 
     var body: some View {
         NavigationSplitView {
@@ -83,6 +87,11 @@ struct RootView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button { state.composerOpen = true } label: { Image(systemName: "square.and.pencil") }
+                    .help("New note (Cmd+N)")
+                    .accessibilityLabel("New note")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 5) {
                     FindField(text: $find, host: host) { host.step(true) }
                         .frame(width: 170, height: 22)
@@ -99,18 +108,21 @@ struct RootView: View {
                             .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear find")
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.secondary.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .disabled(state.selectedNote == nil)
                 .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in
                     if state.selectedNote != nil { host.focusFind() }
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await state.trashSelected() } } label: { Image(systemName: "trash") }
-                    .disabled(state.selectedNote == nil)
-                    .help("Move to TRASH (Cmd+Delete)")
+                // The button asks first; Cmd+Delete does not. A click can land by
+                // accident on a toolbar you were only passing through - the
+                // shortcut is deliberate, and confirming it every time would be
+                // noise on the gesture that exists to be fast.
+                Button { confirmingTrash = true } label: { Image(systemName: "trash") }
+                    .disabled(state.selectedNote == nil || state.selectedNote?.frozen == true)
+                    .help(state.selectedNote?.frozen == true
+                          ? "This note is locked - unlock it in the web app"
+                          : "Move to TRASH (Cmd+Delete skips this)")
                     .accessibilityLabel("Move note to trash")
             }
         }
@@ -137,6 +149,19 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.2), value: state.toast)
         .overlay {
             if state.paletteOpen { SearchPaletteView().transition(.opacity) }
+        }
+        .sheet(isPresented: $state.composerOpen) { NewNoteView() }
+        .confirmationDialog(
+            "Move \u{201C}\(state.selectedNote?.title ?? "")\u{201D} to TRASH?",
+            isPresented: $confirmingTrash,
+            titleVisibility: .visible
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                Dust.dissolve(over: host.view) { await state.trashSelected() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("It stays in TRASH for 7 days. Cmd+Delete skips this confirmation.")
         }
         .animation(.easeOut(duration: 0.12), value: state.paletteOpen)
     }
@@ -224,7 +249,7 @@ struct NoteListView: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                TextField("Search all notes", text: $state.query)
+                TextField("Filter by title", text: $state.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                 if !state.query.isEmpty {
@@ -262,11 +287,32 @@ struct NoteListView: View {
                     .background(.orange.opacity(0.12))
                 }
                 List(state.visible, selection: $state.selected) { note in
-                    NoteRow(note: note).tag(note.id)
+                    NoteRow(note: note)
+                        .tag(note.id)
+                        .listRowBackground(rowBackground(note))
                 }
                 .listStyle(.inset)
+                .background(SelectionStyler())
             }
         }
+    }
+
+    /// The selected row wears its own folder colour, the way the web list does -
+    /// the system accent blue says nothing about which note this is.
+    @ViewBuilder
+    private func rowBackground(_ note: Note) -> some View {
+        if state.selected == note.id {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(rowTint(note).opacity(0.28))
+                .padding(.horizontal, 4)
+        } else {
+            Color.clear
+        }
+    }
+
+    private func rowTint(_ note: Note) -> Color {
+        guard let c = note.parsedColor else { return .accentColor }
+        return Color(red: c.r, green: c.g, blue: c.b)
     }
 
     private func message(_ text: String, systemImage: String?, retry: Bool) -> some View {
@@ -287,31 +333,128 @@ struct NoteListView: View {
 struct NoteRow: View {
     let note: Note
 
+    // Tight on purpose: every point the trailing columns give back is a point of
+    // title the row can show before it truncates.
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 6) {
             Image(systemName: NoteIcon.symbol(for: note.icon))
                 .font(.system(size: 13))
-                .frame(width: 18)
+                .frame(width: 16)
                 .foregroundStyle(tint)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(note.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                if let folder = note.folderName, !folder.isEmpty {
-                    Text(folder).font(.system(size: 11)).foregroundStyle(.secondary)
+            // Title only. The folder used to sit under it, which cost every row a
+            // second line for something the icon's colour already carries.
+            Text(note.title).font(.system(size: 13)).lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            // Fixed columns, not a ragged trailing run: a row with no badges must not
+            // slide its submitter icon and date out of line with the row above it.
+            // Share state reads the same as the web app - a globe is public, a teal
+            // lock is passcode-gated, an amber lock is write-protected, and THAT one
+            // is the note the server will refuse to trash.
+            // Only the rows that HAVE a badge pay for the lane. Reserving it on every
+            // row cost ~30pt of title on the 95% of notes that are neither shared nor
+            // locked; the submitter icon and date stay aligned regardless, because
+            // they are anchored to the trailing edge, not to this.
+            if note.isPublic == true || note.locked == true || note.frozen == true {
+                HStack(spacing: 3) {
+                    if note.isPublic == true, note.locked != true {
+                        badge("globe", .green, "Public - anyone with the link")
+                    }
+                    if note.locked == true {
+                        badge("lock", Color(nsColor: .systemTeal), "Private - passcode to view")
+                    }
+                    if note.frozen == true {
+                        badge("lock.fill", .orange, "Locked - cannot be edited or trashed")
+                    }
                 }
             }
 
-            Spacer()
+            SubmitterBadge(note: note)
 
-            Text(note.displayDate).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(note.displayDate)
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .trailing)
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
+    }
+
+    private func badge(_ symbol: String, _ color: Color, _ help: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 10))
+            .foregroundStyle(color)
+            .help(help)
+            .accessibilityLabel(help)
     }
 
     /// Keep the folder colour the dot used to carry - now it tints the icon.
     private var tint: Color {
         guard let c = note.parsedColor else { return .secondary }
         return Color(red: c.r, green: c.g, blue: c.b)
+    }
+}
+
+/// SwiftUI paints List selection with the system accent and gives no way to change
+/// it, so the AppKit table underneath is told not to draw a highlight at all and
+/// each row paints its own - see `rowBackground`.
+struct SelectionStyler: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        // Deferred: the view is not in the hierarchy yet when this first runs.
+        // NSOutlineView is an NSTableView, so the one cast covers both.
+        DispatchQueue.main.async {
+            var next: NSView? = view.superview
+            while let current = next {
+                if let table = current.descendantTable() {
+                    table.selectionHighlightStyle = .none
+                    return
+                }
+                next = current.superview
+            }
+        }
+    }
+}
+
+private extension NSView {
+    /// The first table view at or below this view.
+    func descendantTable() -> NSTableView? {
+        if let table = self as? NSTableView { return table }
+        for child in subviews {
+            if let found = child.descendantTable() { return found }
+        }
+        return nil
+    }
+}
+
+/// Who posted the note, as the web list shows it: the posting app's icon, the
+/// device's, or the owner's avatar. Served by the notes app, so it is the same
+/// artwork both places. An unknown key has no icon file - that falls back to a
+/// initials chip rather than a broken image.
+struct SubmitterBadge: View {
+    let note: Note
+
+    var body: some View {
+        AsyncImage(url: note.submitterIconURL) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().aspectRatio(contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 3))
+            case .failure:
+                Text(note.submitterInitials)
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+                    .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+            case .empty:
+                Color.clear
+            @unknown default:
+                Color.clear
+            }
+        }
+        .frame(width: 16, height: 16)
+        .help(note.createdByKey ?? note.createdByMachine ?? "Created in the notes app")
     }
 }
