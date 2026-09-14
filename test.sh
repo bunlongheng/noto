@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 
 SDK="${SDK:-$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)}"
 TARGET="${TARGET:-arm64-apple-macosx14.0}"
-OUT=".build/StickiesNativeTests"
+OUT=".build/NotoTests"
 
 # Every source except App.swift, which carries @main and would clash with the
 # test executable's own entry point.

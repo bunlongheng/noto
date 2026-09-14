@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build StickiesNative into a signed .app bundle.
+# Build Noto into a signed .app bundle.
 #
 # Usage: ./build.sh [--run]
 #
@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 SDK="${SDK:-$(xcrun --show-sdk-path 2>/dev/null || echo /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)}"
-APP_NAME="StickiesNative"
+APP_NAME="Noto"
 DEPLOY="14.0"
 SOURCES=$(find Sources -name "*.swift" | tr '\n' ' ')
 
@@ -46,11 +46,11 @@ cat > "$APP_NAME.app/Contents/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>StickiesNative</string>
+    <string>Noto</string>
     <key>CFBundleIdentifier</key>
-    <string>com.bheng.stickies-native</string>
+    <string>com.bheng.noto</string>
     <key>CFBundleName</key>
-    <string>Stickies Native</string>
+    <string>Noto</string>
     <key>CFBundleVersion</key>
     <string>2.0</string>
     <key>CFBundleShortVersionString</key>
