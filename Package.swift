@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "StickiesNative",
+    name: "Noto",
     platforms: [
         .macOS(.v14)
     ],
     targets: [
         .executableTarget(
-            name: "StickiesNative",
-            path: "Sources/StickiesNative"
+            name: "Noto",
+            path: "Sources/Noto"
         )
     ]
 )
