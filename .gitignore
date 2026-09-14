@@ -5,5 +5,5 @@
 DerivedData/
 .DS_Store
 .env
-StickiesNative
+/StickiesNative
 StickiesNative.app/
