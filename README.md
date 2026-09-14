@@ -10,7 +10,7 @@
 
 List all your notes, search them, open one, and find text inside it.
 
-[![CI](https://github.com/bunlongheng/stickies-native/actions/workflows/ci.yml/badge.svg)](https://github.com/bunlongheng/stickies-native/actions/workflows/ci.yml)
+[![CI](https://github.com/bunlongheng/noto/actions/workflows/ci.yml/badge.svg)](https://github.com/bunlongheng/noto/actions/workflows/ci.yml)
 ![Swift 6.0](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000000?logo=apple&logoColor=white)
 ![Universal](https://img.shields.io/badge/binary-universal-4B8BBE)
@@ -43,8 +43,8 @@ List all your notes, search them, open one, and find text inside it.
 ## Run it
 
 ```bash
-git clone https://github.com/bunlongheng/stickies-native
-cd stickies-native
+git clone https://github.com/bunlongheng/noto
+cd noto
 echo 'STICKIES_API_KEY=sk_ext_your_key' > ~/.noto.env
 ./build.sh --run
 ```
