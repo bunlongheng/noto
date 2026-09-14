@@ -56,7 +56,7 @@ Stickies server reachable at `http://localhost:4444`.
 
 | Variable | Required | Where |
 |---|---|---|
-| `STICKIES_API_KEY` | yes | environment, or `~/.noto.env` (`~/.stickies-native.env` still works) |
+| `STICKIES_API_KEY` | yes | environment, or `~/.noto.env` |
 
 A missing key shows a setup message rather than crashing.
 
