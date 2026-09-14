@@ -1,12 +1,16 @@
+import AppKit
 import SwiftUI
 
 @main
 struct StickiesNativeApp: App {
     @StateObject private var state = AppState()
+    // Owned here, not in RootView, so the Zoom menu items can drive the same
+    // web view the note is rendered in.
+    @StateObject private var host = WebHost()
 
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(state)
+            RootView().environmentObject(state).environmentObject(host)
         }
         .defaultSize(width: 1100, height: 780)
         .commands {
@@ -18,6 +22,14 @@ struct StickiesNativeApp: App {
                     .keyboardShortcut("f", modifiers: .command)
                 Button("Search Notes") { NotificationCenter.default.post(name: .focusSearch, object: nil) }
                     .keyboardShortcut("f", modifiers: [.command, .shift])
+                Divider()
+                Button("Zoom In") { host.zoomBy(0.1) }
+                    .keyboardShortcut("+", modifiers: .command)
+                Button("Zoom Out") { host.zoomBy(-0.1) }
+                    .keyboardShortcut("-", modifiers: .command)
+                Button("Actual Size") { host.resetZoom() }
+                    .keyboardShortcut("0", modifiers: .command)
+                    .disabled(host.zoom == 1)
                 Divider()
                 Button("Next Tab") { state.stepTab(1) }
                     .keyboardShortcut("]", modifiers: [.command, .shift])
@@ -37,8 +49,9 @@ struct StickiesNativeApp: App {
 
 struct RootView: View {
     @EnvironmentObject var state: AppState
-    @StateObject private var host = WebHost()
+    @EnvironmentObject var host: WebHost
     @State private var find = ""
+    @State private var keyMonitor: Any?
     @FocusState private var findFocused: Bool
 
     var body: some View {
@@ -46,22 +59,29 @@ struct RootView: View {
             NoteListView()
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
         } detail: {
-            if let note = state.selectedNote {
-                VStack(spacing: 0) {
-                    // Above the note, not inside it: full screen hides the sidebar,
-                    // and this is what keeps every other note one click away.
-                    TabBarView()
+            VStack(spacing: 0) {
+                // Above the note, not inside it: full screen hides the sidebar, and
+                // this is what keeps every other note one click away. It stays up
+                // with nothing selected too - otherwise full screen with no note
+                // open has no way to reach one.
+                if !state.tabs.isEmpty { TabBarView() }
+                if let note = state.selectedNote {
                     NoteDetailView(note: note, host: host)
                         .onChange(of: note.id) { _, _ in find = "" }
+                } else {
+                    Text("Select a note")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
-                Text("Select a note")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 760, minHeight: 420)
         .task { state.load() }
+        .onAppear(perform: watchKeys)
+        .onDisappear {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+            keyMonitor = nil
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 5) {
@@ -121,6 +141,49 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state.toast)
+    }
+
+    /// Keys the menu cannot carry on its own.
+    ///
+    /// Plain ← / → step through the notes, but stand down while the search or
+    /// find field is being typed into, so the arrows still move the caret there.
+    /// Cmd +/- zoom the note: SwiftUI's keyboardShortcut("+") only ever matches
+    /// the SHIFTED key, so a plain Cmd+= - what everyone actually presses - never
+    /// reached the menu item. Both spellings are matched here instead.
+    ///
+    /// A local monitor sees the key before the web view and before the menu, and
+    /// returning nil consumes it, so nothing fires twice.
+    private func watchKeys() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+
+            if flags == .command || flags == [.command, .shift] {
+                switch event.charactersIgnoringModifiers {
+                case "=", "+": host.zoomBy(0.1);  return nil
+                case "-", "_": host.zoomBy(-0.1); return nil
+                case "0":      host.resetZoom();  return nil
+                default: break
+                }
+            }
+
+            // Ctrl+Cmd+F. Recent macOS binds the system "Enter Full Screen" item to
+            // Globe+F instead, so the shortcut every other app trained us on no
+            // longer reaches the window. keyCode 3 is F; charactersIgnoringModifiers
+            // comes back as a control character while Control is held.
+            if flags == [.command, .control], event.keyCode == 3 {
+                event.window?.toggleFullScreen(nil)
+                return nil
+            }
+
+            // macOS stamps every arrow key with .function and .numericPad, so a
+            // bare "no modifiers" test on the raw flags never matches.
+            guard flags.isEmpty, event.keyCode == 123 || event.keyCode == 124 else { return event }
+            if let responder = event.window?.firstResponder,
+               responder is NSTextView || responder is NSTextField { return event }
+            state.stepTab(event.keyCode == 123 ? -1 : 1)
+            return nil
+        }
     }
 }
 
