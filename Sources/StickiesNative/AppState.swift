@@ -30,6 +30,12 @@ final class AppState: ObservableObject {
     /// ran three times per body evaluation, on every published change.
     @Published private(set) var visible: [Note] = []
 
+    /// The tab strip mirrors the visible list, minus the tabs the user closed -
+    /// the same rule the web app uses. Closing has to be remembered here or the
+    /// next refilter brings the tab straight back.
+    @Published private(set) var tabs: [Note] = []
+    private var dismissed: Set<Note.ID> = []
+
     private let api = APIClient()
     private var loadTask: Task<Void, Never>?
     private var lastTrashed: Trashed?
@@ -42,6 +48,7 @@ final class AppState: ObservableObject {
     private func refilter() {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         visible = q.isEmpty ? notes : notes.filter { $0.searchKey.contains(q) }
+        tabs = dismissed.isEmpty ? visible : visible.filter { !dismissed.contains($0.id) }
         // Selection could otherwise point at a note the filter hides, leaving the
         // detail pane and Cmd+Delete acting on something not on screen.
         if let s = selected, !visible.contains(where: { $0.id == s }) { selected = nil }
@@ -71,6 +78,28 @@ final class AppState: ObservableObject {
             loadTask = nil
         }
         // Callers await nothing; the task owns its own lifetime.
+    }
+
+    /// Close a tab. The note itself is untouched - this only hides it from the
+    /// strip - and the neighbour that slides into the slot becomes active so the
+    /// detail pane never goes blank.
+    func closeTab(_ id: Note.ID) {
+        let index = tabs.firstIndex { $0.id == id }
+        dismissed.insert(id)
+        refilter()
+        guard selected == id else { return }
+        guard let index, !tabs.isEmpty else { selected = nil; return }
+        selected = tabs[min(index, tabs.count - 1)].id
+    }
+
+    /// Flip to the next or previous tab, wrapping at either end.
+    func stepTab(_ direction: Int) {
+        guard !tabs.isEmpty else { return }
+        guard let current = tabs.firstIndex(where: { $0.id == selected }) else {
+            selected = tabs[0].id
+            return
+        }
+        selected = tabs[(current + direction + tabs.count) % tabs.count].id
     }
 
     /// The body of a note, cached by id and revision so re-selecting is instant.
