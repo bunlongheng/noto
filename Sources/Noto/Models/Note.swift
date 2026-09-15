@@ -20,6 +20,10 @@ struct Note: Identifiable, Codable, Equatable {
     /// list badges each row with.
     var createdByKey: String?
     var createdByMachine: String?
+    /// When it was trashed - the server purges TRASH on its own 7 day schedule.
+    var trashedAt: String?
+    /// Survives the trash move, so it is how a restore finds its way home.
+    var folderId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, type, content, icon, locked, frozen
@@ -30,6 +34,8 @@ struct Note: Identifiable, Codable, Equatable {
         case isPublic = "is_public"
         case createdByKey = "created_by_key"
         case createdByMachine = "created_by_machine"
+        case trashedAt = "trashed_at"
+        case folderId = "folder_id"
     }
 
     /// The All view is ordered by created_at server-side, so show creation time -
@@ -80,6 +86,16 @@ struct Note: Identifiable, Codable, Equatable {
     /// Lowercased title + folder, computed once, so the search filter is a plain
     /// substring test rather than a locale-aware compare over every note per keystroke.
     var searchKey: String { (title + " " + (folderName ?? "")).lowercased() }
+
+    /// Days before the server purges this note for good, or nil when it is not in
+    /// TRASH. Matches the web app's "Nd left".
+    var daysLeft: Int? {
+        guard let stamp = trashedAt,
+              let date = Note.isoFractional.date(from: stamp) ?? Note.iso.date(from: stamp)
+        else { return nil }
+        let gone = date.addingTimeInterval(7 * 86_400)
+        return max(0, Int(gone.timeIntervalSinceNow / 86_400) + 1)
+    }
 
     /// The badge for who posted this note, served by the notes app itself.
     ///

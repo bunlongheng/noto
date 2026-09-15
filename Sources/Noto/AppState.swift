@@ -30,6 +30,10 @@ final class AppState: ObservableObject {
     /// The new-note composer sheet. Here rather than in RootView so the File menu
     /// can open it too.
     @Published var composerOpen = false
+    /// TRASH is a separate list, not a filter of the main one - the server never
+    /// sends trashed notes with the rest.
+    @Published var viewingTrash = false { didSet { selected = nil; refilter() } }
+    @Published private(set) var trashNotes: [Note] = []
     @Published var loadedCount: Int?
 
     /// Recomputed only when notes or the query change. As a computed property this
@@ -49,11 +53,15 @@ final class AppState: ObservableObject {
 
     init() { bodies.totalCostLimit = 50 * 1024 * 1024 }
 
-    var selectedNote: Note? { notes.first { $0.id == selected } }
+    var selectedNote: Note? { source.first { $0.id == selected } }
+
+    /// The list being shown: TRASH or everything else.
+    private var source: [Note] { viewingTrash ? trashNotes : notes }
 
     private func refilter() {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        visible = q.isEmpty ? notes : notes.filter { $0.searchKey.contains(q) }
+        let rows = source
+        visible = q.isEmpty ? rows : rows.filter { $0.searchKey.contains(q) }
         tabs = dismissed.isEmpty ? visible : visible.filter { !dismissed.contains($0.id) }
         // Selection could otherwise point at a note the filter hides, leaving the
         // detail pane and Cmd+Delete acting on something not on screen.
@@ -72,8 +80,10 @@ final class AppState: ObservableObject {
                 let all = try await api.fetchAllNotes { [weak self] page, total in
                     self?.notes = page
                     self?.loadedCount = total
+                    self?.selectFirstIfNeeded()
                 }
                 notes = all
+                selectFirstIfNeeded()
             } catch is CancellationError {
                 // Superseded by a newer load.
             } catch {
@@ -84,6 +94,66 @@ final class AppState: ObservableObject {
             loadTask = nil
         }
         // Callers await nothing; the task owns its own lifetime.
+    }
+
+    /// Load TRASH. Cheap enough to refetch on every visit - it holds tens of notes,
+    /// not the 1,400 the main list pages through.
+    func loadTrash() {
+        Task {
+            do {
+                trashNotes = try await api.fetchTrash()
+                refilter()
+                selectFirstIfNeeded()
+            } catch {
+                show(.failure, "Could not read TRASH: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Put the selected trashed note back in the folder it came from.
+    ///
+    /// The trash move overwrote folder_name, but folder_id survived it, so the old
+    /// folder is recovered by matching that id against a note still in the list.
+    /// CLAUDE is the fallback - the same folder the server files an unplaceable
+    /// note into.
+    func restoreSelected() async {
+        guard viewingTrash, let note = selectedNote,
+              let index = trashNotes.firstIndex(where: { $0.id == note.id }) else { return }
+        let folder = notes.first { $0.folderId == note.folderId && $0.folderId != nil }?.folderName ?? "CLAUDE"
+        do {
+            try await api.restore(id: note.id, toFolder: folder)
+            trashNotes.remove(at: index)
+            selected = nil
+            refilter()
+            selectFirstIfNeeded()
+            show(.success, "Restored to \(folder): \(note.title)")
+            load()                      // and back into the main list it goes
+        } catch {
+            show(.failure, "Could not restore it: \(error.localizedDescription)")
+        }
+    }
+
+    /// Delete everything in TRASH, permanently. The caller must have confirmed.
+    func emptyTrash() async {
+        let count = trashNotes.count
+        do {
+            try await api.emptyTrash()
+            trashNotes = []
+            selected = nil
+            refilter()
+            show(.success, "TRASH emptied: \(count) note\(count == 1 ? "" : "s") gone for good")
+        } catch {
+            show(.failure, "Could not empty TRASH: \(error.localizedDescription)")
+        }
+    }
+
+    /// Open the top note when nothing is open. Launching onto a "Select a note"
+    /// placeholder wastes the first click every time, and the first row is what the
+    /// list is already scrolled to. Only ever fills an EMPTY selection, so a refresh
+    /// never yanks the user off the note they are reading.
+    func selectFirstIfNeeded() {
+        guard selected == nil, let first = visible.first else { return }
+        selected = first.id
     }
 
     /// Close a tab. The note itself is untouched - this only hides it from the
@@ -120,6 +190,7 @@ final class AppState: ObservableObject {
     /// Move to TRASH. Not a destructive delete - the server purges trash on its own
     /// 7 day schedule, and `undoTrash` puts it back until then.
     func trashSelected() async {
+        guard !viewingTrash else { return }      // already there
         guard let note = selectedNote, let index = notes.firstIndex(where: { $0.id == note.id }) else { return }
         // Write-protected notes are refused by the server (423). Say so here rather
         // than firing a request that can only fail.

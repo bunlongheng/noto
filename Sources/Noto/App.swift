@@ -56,6 +56,7 @@ struct RootView: View {
     @State private var find = ""
     @State private var keyMonitor: Any?
     @State private var confirmingTrash = false
+    @State private var confirmingEmpty = false
 
     var body: some View {
         NavigationSplitView {
@@ -113,17 +114,36 @@ struct RootView: View {
                     if state.selectedNote != nil { host.focusFind() }
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
+            // The condition wraps the ITEMS, not their contents: an `if` inside a
+            // ToolbarItem collapses to an empty item that never appears.
+            if state.viewingTrash {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { Task { await state.restoreSelected() } } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .disabled(state.selectedNote == nil)
+                    .help("Put this note back where it came from")
+                    .accessibilityLabel("Restore note")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { confirmingEmpty = true } label: { Image(systemName: "trash.slash") }
+                        .disabled(state.trashNotes.isEmpty)
+                        .help("Delete everything in TRASH permanently")
+                        .accessibilityLabel("Empty trash")
+                }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
                 // The button asks first; Cmd+Delete does not. A click can land by
                 // accident on a toolbar you were only passing through - the
                 // shortcut is deliberate, and confirming it every time would be
                 // noise on the gesture that exists to be fast.
-                Button { confirmingTrash = true } label: { Image(systemName: "trash") }
-                    .disabled(state.selectedNote == nil || state.selectedNote?.frozen == true)
-                    .help(state.selectedNote?.frozen == true
-                          ? "This note is locked - unlock it in the web app"
-                          : "Move to TRASH (Cmd+Delete skips this)")
-                    .accessibilityLabel("Move note to trash")
+                    Button { confirmingTrash = true } label: { Image(systemName: "trash") }
+                        .disabled(state.selectedNote == nil || state.selectedNote?.frozen == true)
+                        .help(state.selectedNote?.frozen == true
+                              ? "This note is locked - unlock it in the web app"
+                              : "Move to TRASH (Cmd+Delete skips this)")
+                        .accessibilityLabel("Move note to trash")
+                }
             }
         }
         .overlay(alignment: .bottom) {
@@ -162,6 +182,16 @@ struct RootView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("It stays in TRASH for 7 days. Cmd+Delete skips this confirmation.")
+        }
+        .confirmationDialog(
+            "Delete all \(state.trashNotes.count) notes in TRASH?",
+            isPresented: $confirmingEmpty,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Permanently", role: .destructive) { Task { await state.emptyTrash() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This cannot be undone - there is no second trash behind this one.")
         }
         .animation(.easeOut(duration: 0.12), value: state.paletteOpen)
     }
@@ -234,15 +264,24 @@ struct NoteListView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("All Notes").font(.system(size: 15, weight: .semibold))
-                Text(state.query.isEmpty ? "\(state.notes.count)" : "\(state.visible.count) of \(state.notes.count)")
+                Text(state.viewingTrash ? "Trash" : "All Notes").font(.system(size: 15, weight: .semibold))
+                Text(countLabel)
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 7).padding(.vertical, 2)
                     .background(Color.secondary.opacity(0.15))
                     .clipShape(Capsule())
                 Spacer()
                 if state.isLoading { ProgressView().scaleEffect(0.5) }
-                Button { state.load() } label: { Image(systemName: "arrow.clockwise") }
+                Button {
+                    state.viewingTrash.toggle()
+                    if state.viewingTrash { state.loadTrash() } else { state.selectFirstIfNeeded() }
+                } label: {
+                    Image(systemName: state.viewingTrash ? "chevron.backward" : "trash")
+                }
+                .buttonStyle(.plain)
+                .help(state.viewingTrash ? "Back to all notes" : "Show TRASH")
+                .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
+                Button { state.viewingTrash ? state.loadTrash() : state.load() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
             .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6)
@@ -271,6 +310,8 @@ struct NoteListView: View {
                 message("Loading notes...", systemImage: nil, retry: false)
             } else if state.notes.isEmpty {
                 message("No notes", systemImage: "tray", retry: true)
+            } else if state.viewingTrash && state.trashNotes.isEmpty {
+                message("Trash is empty", systemImage: "trash", retry: false)
             } else if state.visible.isEmpty {
                 message("No match for \"\(state.query)\"", systemImage: "magnifyingglass", retry: false)
             } else {
@@ -295,6 +336,11 @@ struct NoteListView: View {
                 .background(SelectionStyler())
             }
         }
+    }
+
+    private var countLabel: String {
+        let total = state.viewingTrash ? state.trashNotes.count : state.notes.count
+        return state.query.isEmpty ? "\(total)" : "\(state.visible.count) of \(total)"
     }
 
     /// The selected row wears its own folder colour, the way the web list does -
@@ -373,10 +419,19 @@ struct NoteRow: View {
 
             SubmitterBadge(note: note)
 
-            Text(note.displayDate)
-                .font(.system(size: 10).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 50, alignment: .trailing)
+            // In TRASH the date that matters is the deadline, not the creation time:
+            // the server purges on its own 7 day schedule.
+            if let days = note.daysLeft {
+                Text(days > 0 ? "\(days)d left" : "expiring")
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(days <= 1 ? .red : .orange)
+                    .frame(width: 50, alignment: .trailing)
+            } else {
+                Text(note.displayDate)
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 50, alignment: .trailing)
+            }
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)

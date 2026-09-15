@@ -127,6 +127,43 @@ struct APIClient {
         return try JSONDecoder().decode(SingleNoteResponse.self, from: data).note
     }
 
+    /// Everything in TRASH. Its own call: the list endpoint filters trashed notes
+    /// out by design, so the main list can never show them.
+    func fetchTrash() async throws -> [Note] {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url = URL(string: Config.appBaseURL + Config.notesPath + "?folder=TRASH&limit=500")
+        else { throw APIError.badStatus(0) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(NotesResponse.self, from: data).notes
+    }
+
+    /// Delete every note in TRASH, permanently. There is no undo for this one.
+    ///
+    /// NOT the ext API: an API key may never delete (403 by design, so a leaked key
+    /// cannot destroy notes). The owner path is a KEY-LESS request, which the server
+    /// trusts only from this machine - exactly the guarantee this call wants. The
+    /// server deletes the notes inside TRASH and never the folder row itself.
+    func emptyTrash() async throws {
+        guard let url = URL(string: Config.appBaseURL + "/api/stickies?folder_name=TRASH") else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 30
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        if http.statusCode == 401 || http.statusCode == 403 { throw APIError.forbidden }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+    }
+
     /// Put a note back where it was. The inverse of `trash`.
     ///
     /// `trashed_at` MUST be null, not "" - the column is a timestamp, and an empty
