@@ -14,7 +14,15 @@ import WebKit
 /// a second copy of the note being destroyed.
 @MainActor
 enum Dust {
-    private static let duration: CFTimeInterval = 0.9
+    private static let duration: CFTimeInterval = 1.2
+
+    /// Creeps, then rips. Over the 1.2s: ~11% across at the halfway mark, ~30% at
+    /// 0.85s, and the last 70% of the note goes in the final 0.35s. You get time to
+    /// watch the edge fray before it tears away.
+    ///
+    /// A harder curve (quint) was tried first and read as frozen - 4% across at
+    /// 0.6s looks like nothing is happening at all.
+    private static let curve = CAMediaTimingFunction(controlPoints: 0.45, 0, 0.75, 0.1)
 
     /// Play it over `web`, running `trash` as the note comes apart.
     ///
@@ -40,7 +48,7 @@ enum Dust {
                     // page - the trash call can return in 80ms, which would have the
                     // new note sharp while the old one was still whole.
                     let waited = Date().timeIntervalSince(start)
-                    try? await Task.sleep(for: .seconds(max(0.1, 0.3 - waited)))
+                    try? await Task.sleep(for: .seconds(max(0.1, 0.5 - waited)))
                     reveal(web, over: backdrop)
                 }
             }
@@ -104,20 +112,32 @@ enum Dust {
         emitter.emitterCells = bandColors(snapshot).map { cell($0) }
         root.addSublayer(emitter)
 
+        Whoosh.play()
         animate(mask, key: "locations",
-                from: mask.locations!, to: [1.0, 1.16, 1.34, 1.4] as [NSNumber], ease: .easeIn)
+                from: mask.locations!, to: [1.0, 1.16, 1.34, 1.4] as [NSNumber])
         // "emitterPosition.x" animates nothing - the sub-keypath is not animatable
         // here, and the dust piled up at the left edge instead of following the
         // erase. The whole point, boxed, does move.
         animate(emitter, key: "emitterPosition",
                 from: NSValue(point: emitter.emitterPosition),
-                to: NSValue(point: CGPoint(x: overlay.bounds.width, y: overlay.bounds.midY)),
-                ease: .easeIn)
+                to: NSValue(point: CGPoint(x: overlay.bounds.width, y: overlay.bounds.midY)))
 
         Task {
             try? await Task.sleep(for: .seconds(duration))
             emitter.birthRate = 0            // stop making dust; what is airborne keeps flying
-            try? await Task.sleep(for: .seconds(1.2))
+            // Outlive the last speck. A particle lives up to 1.5s, and tearing the
+            // overlay out at 1.2s deleted the dust still in the air mid-flight - a
+            // pop at the very end of an otherwise smooth exit. Then fade what is
+            // left rather than cutting it, so nothing can flick no matter what is
+            // still on screen.
+            try? await Task.sleep(for: .seconds(1.6))
+            let fadeOut = CABasicAnimation(keyPath: "opacity")
+            fadeOut.fromValue = 1
+            fadeOut.toValue = 0
+            fadeOut.duration = 0.3
+            root.opacity = 0
+            root.add(fadeOut, forKey: "exit")
+            try? await Task.sleep(for: .seconds(0.32))
             overlay.removeFromSuperview()
         }
         return backdrop
@@ -128,55 +148,53 @@ enum Dust {
     /// than cutting in behind it.
     private static func reveal(_ web: WKWebView, over backdrop: CALayer?) {
         guard web.alphaValue == 0 else { return }     // never reveal twice
-        // The blurred stand-in hands over to the real note, so there is never a frame
-        // of bare background between them.
-        if let backdrop {
-            let out = CABasicAnimation(keyPath: "opacity")
-            out.fromValue = 1
-            out.toValue = 0
-            out.duration = 0.5
-            out.fillMode = .forwards
-            out.isRemovedOnCompletion = false
-            backdrop.add(out, forKey: "handover")
-        }
         web.wantsLayer = true
-        web.layerUsesCoreImageFilters = true
         guard let layer = web.layer else { web.alphaValue = 1; return }
 
-        let blur = CIFilter(name: "CIGaussianBlur")
-        blur?.setValue(22, forKey: kCIInputRadiusKey)
-        blur?.name = "settle"
-        layer.filters = blur.map { [$0] }
+        // The blur lives on the BACKDROP, never on the web view.
+        //
+        // Blurring the live view meant animating a Core Image filter, and a filter
+        // animation that ends without its model value committed snaps back to full
+        // blur for one frame before the filter is torn off - that is the flick. The
+        // backdrop is already an out-of-focus copy of the same note, so cross-fading
+        // it out over the sharp view gives the identical "focus arriving" read with
+        // nothing that can snap: opacity and scale both animate TO the values the
+        // layers already hold.
+        let arrive: CFTimeInterval = 0.75
+        let ease = CAMediaTimingFunction(name: .easeInEaseOut)
 
+        layer.opacity = 1
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0
         fade.toValue = 1
-        let sharpen = CABasicAnimation(keyPath: "filters.settle.inputRadius")
-        sharpen.fromValue = 22
-        sharpen.toValue = 0
         let settle = CABasicAnimation(keyPath: "transform.scale")
-        settle.fromValue = 1.04
+        settle.fromValue = 1.03
         settle.toValue = 1
         let group = CAAnimationGroup()
-        group.animations = [fade, sharpen, settle]
-        group.duration = 0.65
-        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        group.animations = [fade, settle]
+        group.duration = arrive
+        group.timingFunction = ease
         layer.add(group, forKey: "arrive")
-
         web.alphaValue = 1
-        Task {
-            try? await Task.sleep(for: .seconds(0.7))
-            layer.filters = nil              // a live blur filter would cost every frame after
-        }
+
+        guard let backdrop else { return }
+        // Model value first, animation second: the layer ends where the animation
+        // ends, so nothing pops when the animation is released.
+        backdrop.opacity = 0
+        let out = CABasicAnimation(keyPath: "opacity")
+        out.fromValue = 1
+        out.toValue = 0
+        out.duration = arrive
+        out.timingFunction = ease
+        backdrop.add(out, forKey: "handover")
     }
 
-    private static func animate(_ layer: CALayer, key: String, from: Any, to: Any,
-                                ease: CAMediaTimingFunctionName) {
+    private static func animate(_ layer: CALayer, key: String, from: Any, to: Any) {
         let a = CABasicAnimation(keyPath: key)
         a.fromValue = from
         a.toValue = to
         a.duration = duration
-        a.timingFunction = CAMediaTimingFunction(name: ease)
+        a.timingFunction = curve
         a.fillMode = .forwards
         a.isRemovedOnCompletion = false
         layer.add(a, forKey: key)
