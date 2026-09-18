@@ -101,9 +101,13 @@ struct SearchPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    // Swift's contains("") is FALSE, so an empty query produced an
+                    // empty title-match set and chipped every row as a body hit.
+                    let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                     let inTitle = titleMatchIDs
                     ForEach(Array(results.enumerated()), id: \.element.id) { index, note in
-                        row(note, active: index == highlighted, inBody: !inTitle.contains(note.id))
+                        row(note, active: index == highlighted,
+                            inBody: searching && !inTitle.contains(note.id))
                             .id(note.id)
                             .onTapGesture { open(note) }
                     }

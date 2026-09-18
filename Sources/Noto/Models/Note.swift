@@ -83,6 +83,30 @@ struct Note: Identifiable, Codable, Equatable {
         return Note.withYear.string(from: date)
     }
 
+    /// The web footer's stamp: "Sep 17 · 2:32 PM".
+    var createdStamp: String {
+        guard let date else { return displayDate }
+        return Note.dayMonth.string(from: date) + " · " + Note.timeOnly.string(from: date)
+    }
+
+    nonisolated(unsafe) private static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated; return f
+    }()
+    /// "2 hr. ago", next to the stamp, as the web footer shows it.
+    var createdAgo: String? {
+        guard let date else { return nil }
+        return Note.relative.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Who posted it, named the way the web footer names it: the work laptop by
+    /// its hostname, an app by its key, and the owner's own browser as "me".
+    var submitterName: String {
+        if createdByMachine == "GV741W2732" { return "GV741W2732" }
+        let key = createdByKey ?? ""
+        if key.isEmpty || key == "stickies" { return "me" }
+        return key
+    }
+
     /// Lowercased title + folder, computed once, so the search filter is a plain
     /// substring test rather than a locale-aware compare over every note per keystroke.
     var searchKey: String { (title + " " + (folderName ?? "")).lowercased() }
@@ -97,26 +121,35 @@ struct Note: Identifiable, Codable, Equatable {
         return max(0, Int(gone.timeIntervalSinceNow / 86_400) + 1)
     }
 
-    /// The badge for who posted this note, served by the notes app itself.
+    /// Candidate badges for who posted this note, best first, each served by the
+    /// notes app itself.
     ///
-    /// Same order the web list uses: the work laptop's device icon wins outright, a
-    /// note written in the browser (no posting key, or the app's own key) shows the
-    /// owner's avatar, and everything else shows the posting app's icon.
-    var submitterIconURL: URL? {
+    /// Same order the web list uses - work laptop's device icon outright, the
+    /// owner's avatar for a note written in the browser, otherwise the posting
+    /// app's icon - and the same suffix rule, so "automations-pipeline" falls back
+    /// to "automations". The last entry is the default icon: a 404 must never leave
+    /// a row showing two mystery letters.
+    ///
+    /// The hub is the exception to the web's rule: there its badge is hidden as
+    /// noise, here a note M4 posted under its own name (or none) shows the Mac mini,
+    /// the same front-view art the drops app uses, never the Stickies icon.
+    var submitterIconURLs: [URL] {
+        let base = Config.appBaseURL
+        let hub = createdByMachine == "M4"
+        let hubIcon = URL(string: base + "/machines/mac-mini-front.png")
+        let fallback = hub ? hubIcon : URL(string: base + "/app-icons/stickies.png")
         if createdByMachine == "GV741W2732" {
-            return URL(string: Config.appBaseURL + "/machines/macbook-m2.png?v=3")
+            return [URL(string: base + "/machines/macbook-m2.png?v=3"), fallback].compactMap { $0 }
         }
         let key = (createdByKey ?? "").lowercased()
-        guard !key.isEmpty, key != "stickies" else {
-            return URL(string: Config.appBaseURL + "/avatar.png")
+        guard !key.isEmpty, key != "stickies", key != "m4" else {
+            return [hub ? hubIcon : URL(string: base + "/avatar.png"), fallback].compactMap { $0 }
         }
-        return URL(string: Config.appBaseURL + "/app-icons/\(key).png")
-    }
-
-    /// Two letters for when the icon 404s - the web falls back to a text chip too.
-    var submitterInitials: String {
-        let source = createdByKey ?? createdByMachine ?? "note"
-        return String(source.prefix(2)).uppercased()
+        var candidates = [URL(string: base + "/app-icons/\(key).png")]
+        let head = key.split(separator: "-").first.map(String.init) ?? key
+        if head != key { candidates.append(URL(string: base + "/app-icons/\(head).png")) }
+        candidates.append(fallback)
+        return candidates.compactMap { $0 }
     }
 
     /// #RRGGBB from the folder, or nil when absent or malformed.

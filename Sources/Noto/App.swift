@@ -57,9 +57,13 @@ struct RootView: View {
     @State private var keyMonitor: Any?
     @State private var confirmingTrash = false
     @State private var confirmingEmpty = false
+    @State private var findBarOpen = false
+    /// Tracked so the footer can appear only once the sidebar is gone - with it
+    /// open, the list row already says who posted the note and when.
+    @State private var columns: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             NoteListView()
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
         } detail: {
@@ -71,7 +75,26 @@ struct RootView: View {
                 if !state.tabs.isEmpty { TabBarView() }
                 if let note = state.selectedNote {
                     NoteDetailView(note: note, host: host)
-                        .onChange(of: note.id) { _, _ in find = "" }
+                        .onChange(of: note.id) { _, _ in closeFind() }
+                        // Over the note, not in the toolbar. As a toolbar item the
+                        // field was the first thing macOS pushed into the overflow
+                        // chevron on a narrower window, so Cmd+F focused a field
+                        // that was not on screen. Here it cannot be collapsed away.
+                        .overlay(alignment: .topTrailing) {
+                            if findBarOpen { findBar }
+                        }
+                        .overlay(alignment: .bottomLeading) { SubmitterChip(note: note) }
+                        // Top centre: the find bar owns the top right and the
+                        // submitter chip the bottom left, so this lands on the one
+                        // edge nothing else uses.
+                        .overlay(alignment: .top) {
+                            if host.showingZoom { zoomBadge }
+                        }
+                        .animation(.easeOut(duration: 0.18), value: host.showingZoom)
+                        .animation(.easeOut(duration: 0.18), value: host.zoom)
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if columns == .detailOnly { NoteFooter(note: note) }
+                        }
                 } else {
                     Text("Select a note")
                         .foregroundStyle(.secondary)
@@ -82,6 +105,8 @@ struct RootView: View {
         .frame(minWidth: 760, minHeight: 420)
         .task { state.load() }
         .onAppear(perform: watchKeys)
+        .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in openFind() }
+        .animation(.easeOut(duration: 0.15), value: findBarOpen)
         .onDisappear {
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
@@ -91,28 +116,6 @@ struct RootView: View {
                 Button { state.composerOpen = true } label: { Image(systemName: "square.and.pencil") }
                     .help("New note (Cmd+N)")
                     .accessibilityLabel("New note")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: 5) {
-                    FindField(text: $find, host: host) { host.step(true) }
-                        .frame(width: 170, height: 22)
-                        .onChange(of: find) { _, new in host.find(new) }
-                    if !find.isEmpty {
-                        Text(host.matches == 0 ? "none" : "\(host.current)/\(host.matches)")
-                            .font(.system(size: 10).monospacedDigit())
-                            .foregroundStyle(host.matches == 0 ? .orange : .secondary)
-                        Button { host.step(false) } label: { Image(systemName: "chevron.up").font(.system(size: 10)) }
-                            .buttonStyle(.plain).disabled(host.matches == 0).accessibilityLabel("Previous match")
-                        Button { host.step(true) } label: { Image(systemName: "chevron.down").font(.system(size: 10)) }
-                            .buttonStyle(.plain).disabled(host.matches == 0).accessibilityLabel("Next match")
-                        Button { find = ""; host.clear() } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
-                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear find")
-                    }
-                }
-                .disabled(state.selectedNote == nil)
-                .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in
-                    if state.selectedNote != nil { host.focusFind() }
-                }
             }
             // The condition wraps the ITEMS, not their contents: an `if` inside a
             // ToolbarItem collapses to an empty item that never appears.
@@ -196,6 +199,78 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.12), value: state.paletteOpen)
     }
 
+    /// The zoom level, shown for a beat after every Cmd +/-/0 and then gone. It
+    /// reads 100% on Actual Size too, so the reset lands with the same confirmation
+    /// every other zoom gets.
+    private var zoomBadge: some View {
+        HStack(spacing: 7) {
+            Image(systemName: host.zoom > 1 ? "plus.magnifyingglass"
+                            : host.zoom < 1 ? "minus.magnifyingglass"
+                            : "1.magnifyingglass")
+                .foregroundStyle(.white.opacity(0.65))
+            Text("\(Int((host.zoom * 100).rounded()))%")
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        }
+        .font(.system(size: 15, weight: .semibold, design: .rounded))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        // A fixed dark HUD, not a material: the note itself is a web page with its
+        // own white background, so a material tinted by the app appearance came out
+        // grey text on grey over white content.
+        .background(Color.black.opacity(0.78), in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.12)))
+        .shadow(color: .black.opacity(0.28), radius: 10, y: 3)
+        .padding(.top, 16)
+        .allowsHitTesting(false)
+        .transition(.opacity.combined(with: .offset(y: -8)))
+        .accessibilityLabel("Zoom \(Int((host.zoom * 100).rounded())) percent")
+    }
+
+    /// Find in note, floating over the page - field, live counter, step buttons.
+    private var findBar: some View {
+        HStack(spacing: 6) {
+            // No magnifier of our own: FindField is an NSSearchField and draws one.
+            FindField(text: $find, host: host) { host.step(true) }
+                .frame(width: 180, height: 18)
+                .onChange(of: find) { _, new in host.find(new) }
+            if !find.isEmpty {
+                Text(host.matches == 0 ? "none" : "\(host.current)/\(host.matches)")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(host.matches == 0 ? .orange : .secondary)
+            }
+            Button { host.step(false) } label: { Image(systemName: "chevron.up").font(.system(size: 10)) }
+                .buttonStyle(.plain).disabled(host.matches == 0).accessibilityLabel("Previous match")
+            Button { host.step(true) } label: { Image(systemName: "chevron.down").font(.system(size: 10)) }
+                .buttonStyle(.plain).disabled(host.matches == 0).accessibilityLabel("Next match")
+            Button { closeFind() } label: { Image(systemName: "xmark").font(.system(size: 10)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Close find")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
+        .shadow(radius: 10, y: 3)
+        .padding(10)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    /// Open the bar and put the caret in it. The field only exists once the bar is
+    /// on screen, so focusing has to wait a beat for SwiftUI to build it.
+    private func openFind() {
+        guard state.selectedNote != nil else { return }
+        findBarOpen = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(60))
+            host.focusFind()
+        }
+    }
+
+    private func closeFind() {
+        findBarOpen = false
+        find = ""
+        host.clear()
+    }
+
     /// Keys the menu cannot carry on its own.
     ///
     /// Plain ← / → step through the notes, but stand down while the search or
@@ -214,6 +289,12 @@ struct RootView: View {
             // the selection out from under the result the user is aiming at.
             if state.paletteOpen, flags.isEmpty { return event }
 
+            // Escape closes the find bar, wherever the caret is.
+            if flags.isEmpty, event.keyCode == 53, findBarOpen {
+                closeFind()
+                return nil
+            }
+
             // Cmd+Shift+F opens the palette, Cmd+F focuses the find field. keyCode 3
             // is F. The menu item alone was not enough for find: setting @FocusState
             // from the menu action left focus on the web view, so the caret never
@@ -224,7 +305,7 @@ struct RootView: View {
                     state.paletteOpen = true
                 } else {
                     guard state.selectedNote != nil else { return event }
-                    host.focusFind()
+                    openFind()
                 }
                 return nil
             }
@@ -288,9 +369,8 @@ struct NoteListView: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                TextField("Filter by title", text: $state.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                FilterField(text: $state.query) { state.stepSelection($0) }
+                    .frame(height: 16)
                 if !state.query.isEmpty {
                     Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
                         .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
@@ -327,13 +407,21 @@ struct NoteListView: View {
                     .padding(.horizontal, 16).padding(.vertical, 6)
                     .background(.orange.opacity(0.12))
                 }
-                List(state.visible, selection: $state.selected) { note in
-                    NoteRow(note: note)
-                        .tag(note.id)
-                        .listRowBackground(rowBackground(note))
+                ScrollViewReader { proxy in
+                    List(state.visible, selection: $state.selected) { note in
+                        NoteRow(note: note)
+                            .tag(note.id)
+                            .listRowBackground(rowBackground(note))
+                    }
+                    .listStyle(.inset)
+                    .background(SelectionStyler())
+                    // Arrow-stepping past the bottom of the window would otherwise
+                    // move a selection nobody can see.
+                    .onChange(of: state.selected) { _, id in
+                        guard let id else { return }
+                        proxy.scrollTo(id)
+                    }
                 }
-                .listStyle(.inset)
-                .background(SelectionStyler())
             }
         }
     }
@@ -403,18 +491,15 @@ struct NoteRow: View {
             // row cost ~30pt of title on the 95% of notes that are neither shared nor
             // locked; the submitter icon and date stay aligned regardless, because
             // they are anchored to the trailing edge, not to this.
-            if note.isPublic == true || note.locked == true || note.frozen == true {
-                HStack(spacing: 3) {
-                    if note.isPublic == true, note.locked != true {
-                        badge("globe", .green, "Public - anyone with the link")
-                    }
-                    if note.locked == true {
-                        badge("lock", Color(nsColor: .systemTeal), "Private - passcode to view")
-                    }
-                    if note.frozen == true {
-                        badge("lock.fill", .orange, "Locked - cannot be edited or trashed")
-                    }
-                }
+            // One status glyph, never two locks: LOCK means write-protected, KEY
+            // means passcode-gated, GLOBE means public. Same glyphs and the same
+            // frozen > private > public priority the web list uses.
+            if note.frozen == true {
+                badge("lock.fill", .orange, "Locked - no edits, cannot be trashed")
+            } else if note.locked == true {
+                badge("key.fill", Color(nsColor: .systemTeal), "Private - passcode to view")
+            } else if note.isPublic == true {
+                badge("globe", .green, "Public - anyone with the link")
             }
 
             SubmitterBadge(note: note)
@@ -452,6 +537,54 @@ struct NoteRow: View {
     }
 }
 
+/// The sidebar filter, in AppKit.
+///
+/// SwiftUI's TextField keeps the arrow keys for the caret, and a global key
+/// monitor never saw Down at all - the letters arrived, keyCode 125 never did. An
+/// NSTextField hands moveDown:/moveUp: to its delegate, which is the hook a search
+/// field is supposed to have: type, then walk the results without touching the
+/// mouse or leaving the field.
+struct FilterField: NSViewRepresentable {
+    @Binding var text: String
+    let onStep: (Int) -> Void
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.placeholderString = "Filter by title"
+        field.font = .systemFont(ofSize: 12)
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        // Only when it differs - assigning while typing resets the insertion point.
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        private let parent: FilterField
+        init(_ parent: FilterField) { self.parent = parent }
+
+        func controlTextDidChange(_ note: Notification) {
+            guard let field = note.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.moveDown(_:)):   parent.onStep(1);  return true
+            case #selector(NSResponder.moveUp(_:)):     parent.onStep(-1); return true
+            default: return false
+            }
+        }
+    }
+}
+
 /// SwiftUI paints List selection with the system accent and gives no way to change
 /// it, so the AppKit table underneath is told not to draw a highlight at all and
 /// each row paints its own - see `rowBackground`.
@@ -485,31 +618,76 @@ private extension NSView {
     }
 }
 
+/// Who posted the open note, bottom left over the page: the device or app icon
+/// by itself, no chrome. Name and time live in the tooltip and the footer.
+struct SubmitterChip: View {
+    let note: Note
+
+    var body: some View {
+        SubmitterBadge(note: note, size: 36)
+            .padding(14)
+            .help("Posted by \(note.submitterName) \u{00B7} \(note.createdStamp)")
+            .accessibilityLabel("Posted by \(note.submitterName), \(note.createdStamp)")
+    }
+}
+
+/// The web app's footer bar: who, when, how long ago, and the folder. Shown only
+/// with the sidebar closed - open, the list row already carries all of it.
+struct NoteFooter: View {
+    let note: Note
+
+    var body: some View {
+        HStack(spacing: 6) {
+            SubmitterBadge(note: note)
+            Text("Posted by \(note.submitterName)")
+            Text("\u{00B7}").foregroundStyle(.tertiary)
+            Text(note.createdStamp).monospacedDigit()
+            if let ago = note.createdAgo {
+                Text("\u{00B7}").foregroundStyle(.tertiary)
+                Text(ago)
+            }
+            Spacer()
+            if let folder = note.folderName { Text(folder) }
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .frame(height: 28)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+}
+
 /// Who posted the note, as the web list shows it: the posting app's icon, the
 /// device's, or the owner's avatar. Served by the notes app, so it is the same
 /// artwork both places. An unknown key has no icon file - that falls back to a
 /// initials chip rather than a broken image.
 struct SubmitterBadge: View {
     let note: Note
+    var size: CGFloat = 16
+    /// Which candidate is being tried. A 404 walks to the next one, and the last is
+    /// the default icon, so the row always ends up with a picture.
+    @State private var attempt = 0
 
     var body: some View {
-        AsyncImage(url: note.submitterIconURL) { phase in
+        let candidates = note.submitterIconURLs
+        AsyncImage(url: candidates[min(attempt, candidates.count - 1)]) { phase in
             switch phase {
             case .success(let image):
-                image.resizable().aspectRatio(contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 3))
+                image.resizable().aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
             case .failure:
-                Text(note.submitterInitials)
-                    .font(.system(size: 7, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, height: 16)
-                    .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                Color.clear.onAppear {
+                    if attempt < candidates.count - 1 { attempt += 1 }
+                }
             case .empty:
                 Color.clear
             @unknown default:
                 Color.clear
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: size, height: size)
         .help(note.createdByKey ?? note.createdByMachine ?? "Created in the notes app")
     }
 }

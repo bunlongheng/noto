@@ -147,6 +147,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Walk the visible list by one. Clamps rather than wraps: this drives the
+    /// arrow keys while the caret is still in the filter field, and a list that
+    /// jumps from the last result back to the first reads as a glitch there.
+    func stepSelection(_ direction: Int) {
+        guard !visible.isEmpty else { return }
+        guard let current = visible.firstIndex(where: { $0.id == selected }) else {
+            selected = (direction > 0 ? visible.first : visible.last)?.id
+            return
+        }
+        selected = visible[min(max(current + direction, 0), visible.count - 1)].id
+    }
+
     /// Open the top note when nothing is open. Launching onto a "Select a note"
     /// placeholder wastes the first click every time, and the first row is what the
     /// list is already scrolled to. Only ever fills an EMPTY selection, so a refresh
