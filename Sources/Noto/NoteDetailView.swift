@@ -20,16 +20,43 @@ final class WebHost: ObservableObject {
     /// Page zoom, kept here rather than on the web view so it survives switching
     /// notes - the web view is reused, but a fresh load would otherwise be the
     /// only thing carrying it.
-    @Published private(set) var zoom: CGFloat = 1
+    /// Restored from defaults, so a note opens at the size you last chose instead
+    /// of at whatever each note's own HTML asks for.
+    @Published private(set) var zoom: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: "pageZoom")
+        return saved > 0 ? CGFloat(saved) : 1
+    }()
+    /// True while the zoom badge is on screen. Zooming is otherwise silent past
+    /// the first notch - the page reflows, but nothing says how far you have gone
+    /// or how to get back.
+    @Published private(set) var showingZoom = false
+    private var zoomFade: Task<Void, Never>?
 
     func zoomBy(_ delta: CGFloat) {
         zoom = min(3, max(0.5, zoom + delta))
         view?.pageZoom = zoom
+        UserDefaults.standard.set(Double(zoom), forKey: "pageZoom")
+        flashZoom()
     }
 
     func resetZoom() {
         zoom = 1
         view?.pageZoom = 1
+        UserDefaults.standard.set(1.0, forKey: "pageZoom")
+        flashZoom()
+    }
+
+    /// Show the badge and restart the fade. Restarting matters: holding Cmd+= is a
+    /// run of separate calls, and a timer left from the first would hide the badge
+    /// mid-zoom.
+    private func flashZoom() {
+        showingZoom = true
+        zoomFade?.cancel()
+        zoomFade = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.1))
+            guard !Task.isCancelled else { return }
+            self?.showingZoom = false
+        }
     }
 
     func find(_ q: String) {
@@ -175,7 +202,18 @@ struct HTMLView: NSViewRepresentable {
         @MainActor
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-            guard navigationAction.navigationType != .other else { return .allow }
+            // .other used to be allowed outright, which was safe while notes could not
+            // run code. Now that they can, a note script could set location.href and
+            // sail the web view to a remote page - where OUR meta CSP no longer
+            // applies and its scripts would run unrestricted. Only the initial
+            // in-place load is allowed through.
+            if navigationAction.navigationType == .other {
+                let url = navigationAction.request.url
+                let isInitialLoad = url == nil
+                    || url?.scheme == "about"
+                    || url?.absoluteString.hasPrefix(Config.appBaseURL) == true
+                if isInitialLoad { return .allow }
+            }
             if let url = navigationAction.request.url,
                url.scheme == "http" || url.scheme == "https" {
                 NSWorkspace.shared.open(url)
@@ -185,14 +223,19 @@ struct HTMLView: NSViewRepresentable {
     }
 
     private var document: String {
-        let body = isHTML ? Self.stripScripts(html) : "<pre class=\"plain\">\(escaped(html))</pre>"
+        let body = isHTML ? html : "<pre class=\"plain\">\(escaped(html))</pre>"
         return """
         <!doctype html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <!-- Blocks every script and network fetch the note carries. CSP does not
-             apply to isolated content worlds, so the find highlighter still runs. -->
-        <meta http-equiv="Content-Security-Policy"
-              content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:">
+        <!-- A note may DRAW but may not PHONE HOME.
+             Reports written by the /html skill chart with Chart.js from a CDN and an
+             inline script, and with scripts blocked outright those canvases rendered
+             as empty boxes here while the web app showed them. So scripts run, and
+             the two CDNs those reports use may serve them - but connect-src 'none'
+             kills fetch/XHR/WebSocket, form-action 'none' kills submissions, and
+             everything not named here is still denied. A note can render itself; it
+             cannot ship what it read anywhere. -->
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: https: http:; font-src data: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">
         <style>
           /* Notes are authored light-theme only (the /html skill enforces it) and set
              colours on their own elements. Declaring "light dark" let macOS dark mode
@@ -206,8 +249,12 @@ struct HTMLView: NSViewRepresentable {
           img, table { max-width:100%; }
           pre { overflow-x:auto; }
           pre.plain { white-space:pre-wrap; word-wrap:break-word; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+          /* Every match wears the SAME yellow - two fills (yellow for the rest,
+             orange for the current one) read as two kinds of hit rather than one
+             set. The current match is marked by an outline instead, so it still
+             stands out without changing colour. */
           mark.sn-hit { background:#ffe066; color:#000; border-radius:2px; padding:0 1px; }
-          mark.sn-hit.sn-cur { background:#ff9500; box-shadow:0 0 0 2px rgba(255,149,0,.45); }
+          mark.sn-hit.sn-cur { box-shadow:0 0 0 2px #1c1c1e; }
         </style></head><body>\(body)</body></html>
         """
     }
@@ -274,22 +321,6 @@ struct HTMLView: NSViewRepresentable {
         """
     }()
 
-    /// Secondary guard. The CSP above already stops a note's scripts from RUNNING;
-    /// this stops their source text from sitting in the DOM, where it leaks into
-    /// textContent, copy-paste and assistive tech.
-    static func stripScripts(_ s: String) -> String {
-        var out = s.replacingOccurrences(
-            of: "<script[^>]*>[\\s\\S]*?</script>",
-            with: "", options: [.regularExpression, .caseInsensitive])
-        out = out.replacingOccurrences(
-            of: "<script[^>]*/?>", with: "", options: [.regularExpression, .caseInsensitive])
-        // Quoted, single-quoted, and bare values - the bare form survived before.
-        out = out.replacingOccurrences(
-            of: "\\son[a-zA-Z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)",
-            with: "", options: [.regularExpression, .caseInsensitive])
-        return out
-    }
-
     private func escaped(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "<", with: "&lt;")
@@ -311,7 +342,7 @@ struct NoteDetailView: View {
             } else if let content {
                 HTMLView(html: content, isHTML: (note.type ?? "") == "html", host: host)
             } else {
-                centered(ProgressView())
+                centered(LaunchTile(note: note))
             }
         }
         .navigationTitle(note.title)

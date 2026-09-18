@@ -4,21 +4,24 @@ enum APIError: LocalizedError {
     case noKey
     case badStatus(Int)
     case forbidden
+    case locked
 
     var errorDescription: String? {
         switch self {
         case .noKey:
-            return "No API key. Add STICKIES_API_KEY to ~/.noto.env"
+            return "No API key. Add NOTO_API_KEY to ~/.noto.env"
         case .badStatus(let code):
             return code == 401 ? "Key rejected (401)" : "Server returned HTTP \(code)"
         case .forbidden:
             return "The server refused this change (403)"
+        case .locked:
+            return "That note is locked. Unlock it in the web app first"
         }
     }
 }
 
-/// Client for the Stickies ext API. Read-mostly: list, fetch one by id, and a
-/// single soft-delete PATCH that moves a note to TRASH.
+/// Client for the notes API. Reads the list and one note at a time, creates a
+/// plain-text note, searches bodies, and moves a note to TRASH.
 struct APIClient {
     private let pageSize = 100
     private let hardCap = 10_000   // stop runaway paging if the server ever misbehaves
@@ -36,7 +39,7 @@ struct APIClient {
         var total: Int?
 
         while all.count < hardCap {
-            let path = "/api/stickies/ext?recent=all&limit=\(pageSize)&offset=\(offset)"
+            let path = Config.notesPath + "?recent=all&limit=\(pageSize)&offset=\(offset)"
             guard let url = URL(string: Config.appBaseURL + path) else { break }
 
             var request = URLRequest(url: url)
@@ -67,7 +70,7 @@ struct APIClient {
     /// when a row is selected.
     func fetchNote(id: String) async throws -> Note {
         guard let key = Config.apiKey else { throw APIError.noKey }
-        guard let url = URL(string: Config.appBaseURL + "/api/stickies/ext?id=" + id) else {
+        guard let url = URL(string: Config.appBaseURL + Config.notesPath + "?id=" + id) else {
             throw APIError.badStatus(0)
         }
         var request = URLRequest(url: url)
@@ -80,9 +83,94 @@ struct APIClient {
         return try JSONDecoder().decode(SingleNoteResponse.self, from: data).note
     }
 
+    /// Server-side search. The list endpoint never sends note bodies, so matching
+    /// anything but a title has to happen where the content actually lives. The
+    /// server caps this at 50 rows and matches title OR content.
+    func search(_ q: String) async throws -> [Note] {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        var components = URLComponents(string: Config.appBaseURL + Config.notesPath)
+        components?.queryItems = [URLQueryItem(name: "q", value: q)]
+        guard let url = components?.url else { throw APIError.badStatus(0) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(NotesResponse.self, from: data).notes
+    }
+
+    /// Create a plain-text note. `type: "text"` is sent explicitly because the
+    /// server otherwise sniffs the body and would file a note that happens to open
+    /// with a tag or a brace as html/json.
+    func create(title: String, content: String) async throws -> Note {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url = URL(string: Config.appBaseURL + Config.notesPath) else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["title": title, "content": content, "type": "text"])
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        if http.statusCode == 403 { throw APIError.forbidden }
+        // 423 is the server's write-protect on a locked note - it refuses the trash
+        // move as firmly as it refuses an edit.
+        if http.statusCode == 423 { throw APIError.locked }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(SingleNoteResponse.self, from: data).note
+    }
+
+    /// Everything in TRASH. Its own call: the list endpoint filters trashed notes
+    /// out by design, so the main list can never show them.
+    func fetchTrash() async throws -> [Note] {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url = URL(string: Config.appBaseURL + Config.notesPath + "?folder=TRASH&limit=500")
+        else { throw APIError.badStatus(0) }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(NotesResponse.self, from: data).notes
+    }
+
+    /// Delete every note in TRASH, permanently. There is no undo for this one.
+    ///
+    /// NOT the ext API: an API key may never delete (403 by design, so a leaked key
+    /// cannot destroy notes). The owner path is a KEY-LESS request, which the server
+    /// trusts only from this machine - exactly the guarantee this call wants. The
+    /// server deletes the notes inside TRASH and never the folder row itself.
+    func emptyTrash() async throws {
+        guard let url = URL(string: Config.appBaseURL + "/api/stickies?folder_name=TRASH") else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 30
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        if http.statusCode == 401 || http.statusCode == 403 { throw APIError.forbidden }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+    }
+
     /// Put a note back where it was. The inverse of `trash`.
+    ///
+    /// `trashed_at` MUST be null, not "" - the column is a timestamp, and an empty
+    /// string made Postgres reject the UPDATE, so every Undo came back 500 and the
+    /// note stayed in TRASH.
     func restore(id: String, toFolder folder: String?) async throws {
-        try await patch(["id": id, "folder_name": folder ?? "", "trashed_at": ""])
+        try await patch(["id": id, "folder_name": folder ?? "", "trashed_at": nil])
     }
 
     /// Move a note to TRASH - the same soft delete the web app performs
@@ -97,9 +185,9 @@ struct APIClient {
         ])
     }
 
-    private func patch(_ payload: [String: String]) async throws {
+    private func patch(_ payload: [String: String?]) async throws {
         guard let key = Config.apiKey else { throw APIError.noKey }
-        guard let url = URL(string: Config.appBaseURL + "/api/stickies/ext") else {
+        guard let url = URL(string: Config.appBaseURL + Config.notesPath) else {
             throw APIError.badStatus(0)
         }
         var request = URLRequest(url: url)
