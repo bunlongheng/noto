@@ -2,7 +2,7 @@ import AppKit
 
 /// Maps the icon token the API stores on a note to an SF Symbol.
 ///
-/// Stickies stores either "__hero:<HeroiconName>" (the web app renders Heroicons)
+/// The server stores either "__hero:<HeroiconName>" (the web app renders Heroicons)
 /// or "__<app>" / "__app:<name>" for notes posted by a specific tool. Neither set
 /// exists on macOS, so each is mapped to the closest SF Symbol. Every result is
 /// checked against the running system before use - an unavailable symbol name

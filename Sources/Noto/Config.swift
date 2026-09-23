@@ -3,10 +3,27 @@ import Foundation
 enum Config {
     static let appBaseURL = "http://localhost:4444"
 
-    /// The Stickies ext API key, or nil when it is not configured.
+    /// The notes endpoint on the server. Spelled once here because it is the
+    /// SERVER's route name, not this app's - it stays "stickies" no matter what
+    /// this app is called.
+    static let notesPath = "/api/stickies/ext"
+
+    /// The OWNER path - same route, no key. Share state (public / passcode) is
+    /// owner-only on the server: it strips is_public, locked and lock_password from
+    /// any API-key PATCH, so a keyed share request returns 200 and changes nothing.
+    /// A keyless request is trusted from this machine alone, which is the same
+    /// guarantee emptyTrash already relies on.
+    static let ownerPath = "/api/stickies"
+
+    /// Where a shared note is READ from. A link to localhost is useless to whoever
+    /// it is sent to, so the copied URL always points at the public deployment -
+    /// the same base the web app's share sheet uses.
+    static let shareBaseURL = "https://stickies-bheng.vercel.app"
+
+    /// The Noto API key, or nil when it is not configured.
     /// Returns nil rather than calling fatalError so a missing key shows a setup
     /// message instead of crashing the app on launch.
-    static let apiKey: String? = readEnv("STICKIES_API_KEY")
+    static let apiKey: String? = readEnv("NOTO_API_KEY")
 
     private static func readEnv(_ key: String) -> String? {
         if let val = ProcessInfo.processInfo.environment[key], !val.isEmpty { return val }
