@@ -181,13 +181,16 @@ final class AppState: ObservableObject {
     }
 
     /// Flip to the next or previous tab, wrapping at either end.
+    /// Clamped at both ends, never wrapped: stepping left off the newest tab used
+    /// to land on the oldest one open, which reads as a random jump months back.
+    /// The arrow is still swallowed at the edge, so macOS does not beep either.
     func stepTab(_ direction: Int) {
         guard !tabs.isEmpty else { return }
         guard let current = tabs.firstIndex(where: { $0.id == selected }) else {
             selected = tabs[0].id
             return
         }
-        selected = tabs[(current + direction + tabs.count) % tabs.count].id
+        selected = tabs[min(max(current + direction, 0), tabs.count - 1)].id
     }
 
     /// The body of a note, cached by id and revision so re-selecting is instant.
@@ -261,7 +264,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func show(_ kind: Toast.Kind, _ message: String) {
+    /// Not private: the image export reports through the same toast.
+    func show(_ kind: Toast.Kind, _ message: String) {
         let t = Toast(kind: kind, text: message)
         toast = t
         AccessibilityNotification.Announcement(message).post()
