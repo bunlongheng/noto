@@ -20,6 +20,24 @@ enum APIError: LocalizedError {
     }
 }
 
+/// The share flags, exactly as the server names them. A field left nil is left
+/// out of the request entirely, so each toggle sends only what it changes.
+/// `passcode` is the plaintext the server hashes - the hash column itself is
+/// server-managed and refuses a client write.
+struct ShareFields: Encodable, Sendable {
+    var id: String?
+    var isPublic: Bool?
+    var locked: Bool?
+    var passcode: String?
+    var frozen: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, locked, frozen
+        case isPublic = "is_public"
+        case passcode = "lock_password"
+    }
+}
+
 /// Client for the notes API. Reads the list and one note at a time, creates a
 /// plain-text note, searches bodies, and moves a note to TRASH.
 struct APIClient {
@@ -120,9 +138,6 @@ struct APIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
         if http.statusCode == 403 { throw APIError.forbidden }
-        // 423 is the server's write-protect on a locked note - it refuses the trash
-        // move as firmly as it refuses an edit.
-        if http.statusCode == 423 { throw APIError.locked }
         guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
         return try JSONDecoder().decode(SingleNoteResponse.self, from: data).note
     }
@@ -200,6 +215,36 @@ struct APIClient {
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
         if http.statusCode == 403 { throw APIError.forbidden }
+        // 423 is the server's write-protect on a frozen note - it refuses the trash
+        // move as firmly as it refuses an edit. The list's frozen flag is checked
+        // first, but it can be stale: the web app may have frozen the note since.
+        if http.statusCode == 423 { throw APIError.locked }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+    }
+
+    /// Change a note's share state: public, passcode-gated, or write-protected.
+    ///
+    /// Goes to the KEY-LESS owner path, not /ext. The server strips is_public,
+    /// locked and lock_password from every API-key PATCH by design
+    /// (app/api/stickies/route.ts:1316), so the keyed request this app uses for
+    /// everything else comes back 200 having changed nothing at all. The keyless
+    /// path is trusted only from this machine - the same route emptyTrash takes.
+    func setShare(id: String, _ fields: ShareFields) async throws {
+        guard let url = URL(string: Config.appBaseURL + Config.ownerPath) else {
+            throw APIError.badStatus(0)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body = fields
+        body.id = id
+        request.httpBody = try JSONEncoder().encode(body)
+        request.timeoutInterval = 20
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        if http.statusCode == 401 || http.statusCode == 403 { throw APIError.forbidden }
+        if http.statusCode == 423 { throw APIError.locked }
         guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
     }
 }

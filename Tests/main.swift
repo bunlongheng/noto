@@ -444,4 +444,40 @@ clip.setString("Resource Audit", forType: .string)
 filter.stringValue = "Resource Audit"
 T.check("the sidebar filter carries the same guard", filter.performKeyEquivalent(with: cmdV()))
 
+// MARK: - Share: the fields the owner path writes
+
+// The server names these columns, not this app - a field spelled wrong here is a
+// share toggle that returns 200 and changes nothing.
+func shareJSON(_ f: ShareFields) -> [String: Any] {
+    let data = try! JSONEncoder().encode(f)
+    return (try! JSONSerialization.jsonObject(with: data)) as! [String: Any]
+}
+var fields = ShareFields(isPublic: true)
+fields.id = "abc"
+var json = shareJSON(fields)
+T.equal("public goes out as is_public", json["is_public"] as? Bool, true)
+T.check("a toggle sends only what it changes", json["locked"] == nil && json["frozen"] == nil)
+
+// Locking implies sharing: the web toggle publishes the note at the same time, and
+// sends the passcode in plaintext for the server to hash.
+json = shareJSON(ShareFields(isPublic: true, locked: true, passcode: "s3cret"))
+T.equal("the passcode goes out as lock_password", json["lock_password"] as? String, "s3cret")
+T.equal("locking publishes at the same time", json["is_public"] as? Bool, true)
+
+// Blank is a real answer, not a missing one - "shared, no gate".
+json = shareJSON(ShareFields(locked: true, passcode: ""))
+T.equal("an empty passcode is still sent", json["lock_password"] as? String, "")
+
+json = shareJSON(ShareFields(frozen: false))
+T.equal("releasing the write-protect sends frozen false", json["frozen"] as? Bool, false)
+T.check("releasing it touches nothing else", json["is_public"] == nil && json["locked"] == nil)
+
+// Share writes must NEVER go to the keyed /ext route: the server strips every
+// share field from an API-key PATCH, so that request would silently do nothing.
+T.equal("share writes use the owner path", Config.ownerPath, "/api/stickies")
+T.check("the owner path is not the keyed one", Config.ownerPath != Config.notesPath)
+// A localhost link is useless to whoever it is sent to.
+T.check("the share link points at the public deployment",
+        Config.shareBaseURL.hasPrefix("https://") && !Config.shareBaseURL.contains("localhost"))
+
 T.report()

@@ -249,6 +249,77 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Share
+
+    /// The link a shared note is read from. Always the public deployment: a
+    /// localhost URL is useless to whoever it is sent to.
+    func shareURL(for note: Note) -> String {
+        Config.shareBaseURL + "/share?noteId=\(note.id)"
+    }
+
+    /// Publish or unpublish. Unpublishing also releases the passcode, the same way
+    /// the web toggle does - a passcode on a note nobody can reach gates nothing.
+    func setPublic(_ on: Bool) async {
+        guard let note = selectedNote else { return }
+        var fields = ShareFields(isPublic: on)
+        if !on { fields.locked = false }
+        await write(fields, to: note, then: { n in
+            n.isPublic = on
+            if !on { n.locked = false }
+        }, saying: on ? "Public - anyone with the link" : "No longer shared")
+        if on { copy(shareURL(for: note), as: "Link copied") }
+    }
+
+    /// Gate the share behind a passcode, or drop the gate. Locking implies sharing,
+    /// so it publishes the note too if it was not public yet - the same implication
+    /// the web toggle carries. Unlocking leaves it public: never surprise-unpublish
+    /// a link that has already been sent to someone.
+    func setPrivate(_ on: Bool, passcode: String) async {
+        guard let note = selectedNote else { return }
+        let wasPublic = note.isPublic == true
+        var fields = ShareFields(locked: on)
+        if on {
+            fields.passcode = passcode
+            if !wasPublic { fields.isPublic = true }
+        }
+        await write(fields, to: note, then: { n in
+            n.locked = on
+            if on { n.isPublic = true }
+        }, saying: on ? (passcode.isEmpty ? "Private - shared, no passcode" : "Private - passcode required")
+                      : "Public - no passcode")
+        if on, !wasPublic { copy(shareURL(for: note), as: "Link copied") }
+    }
+
+    /// Write-protect, or release it. The server refuses every edit AND the trash
+    /// move on a frozen note, which is why this is the one share control that has
+    /// to be reachable from here - otherwise a note frozen anywhere can never be
+    /// released from this app.
+    func setFrozen(_ on: Bool) async {
+        guard let note = selectedNote else { return }
+        await write(ShareFields(frozen: on), to: note, then: { $0.frozen = on },
+                    saying: on ? "Locked - no edits, cannot be trashed" : "Unlocked")
+    }
+
+    /// One path for all three toggles: send it, then mirror it onto the row in
+    /// place. A reload would cost a full 2.6s crawl to show one changed badge.
+    private func write(_ fields: ShareFields, to note: Note,
+                       then apply: (inout Note) -> Void, saying message: String) async {
+        do {
+            try await api.setShare(id: note.id, fields)
+            if let i = notes.firstIndex(where: { $0.id == note.id }) { apply(&notes[i]) }
+            if let i = trashNotes.firstIndex(where: { $0.id == note.id }) { apply(&trashNotes[i]) }
+            show(.success, message)
+        } catch {
+            show(.failure, "Could not change sharing: \(error.localizedDescription)")
+        }
+    }
+
+    func copy(_ text: String, as message: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        show(.success, message)
+    }
+
     var canUndoTrash: Bool { lastTrashed != nil }
 
     func undoTrash() async {
