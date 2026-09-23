@@ -101,6 +101,58 @@ final class WebHost: ObservableObject {
     }
 }
 
+/// Stops the second Cmd+V.
+///
+/// A paste that only repeats what the field already holds is an accident - the
+/// key landing twice, or a trackpad click that fired twice - and the search then
+/// runs against "Iframe Iframe" and reports none, which reads as a broken search
+/// rather than a double paste. The repeat is refused instead of corrected after
+/// the fact, so the field never holds the doubled string at all.
+///
+/// Only an exact repeat of the WHOLE field is refused. Pasting a word into a
+/// field that holds something else, or pasting a second different word, is a
+/// normal edit and goes through untouched.
+enum PasteGuard {
+    static func isPaste(_ event: NSEvent) -> Bool {
+        event.type == .keyDown
+            && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+            && event.charactersIgnoringModifiers?.lowercased() == "v"
+    }
+
+    /// True when this paste would only duplicate what is already there.
+    static func repeats(_ current: String, clipboard: String?) -> Bool {
+        guard let clipboard else { return false }
+        let pasted = clipboard.trimmingCharacters(in: .whitespacesAndNewlines)
+        let held = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pasted.isEmpty, !held.isEmpty else { return false }
+        return held.caseInsensitiveCompare(pasted) == .orderedSame
+    }
+
+    /// The one call a field makes: swallow the event, or let it through.
+    static func blocks(_ event: NSEvent, current: String) -> Bool {
+        isPaste(event) && repeats(current, clipboard: NSPasteboard.general.string(forType: .string))
+    }
+}
+
+/// The find field, minus the double paste.
+final class GuardedSearchField: NSSearchField {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Returning true consumes it. Nothing beeps: the event is handled, it
+        // simply had nothing left to do.
+        if PasteGuard.blocks(event, current: stringValue) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+/// The sidebar filter, same guard. Pasting the same title twice there hides every
+/// row just as thoroughly.
+final class GuardedTextField: NSTextField {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if PasteGuard.blocks(event, current: stringValue) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 /// A real NSSearchField for the toolbar.
 ///
 /// SwiftUI's TextField cannot be focused programmatically from a toolbar item, so
@@ -112,7 +164,7 @@ struct FindField: NSViewRepresentable {
     let onSubmit: () -> Void
 
     func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
+        let field = GuardedSearchField()
         field.placeholderString = "Find in note"
         field.font = .systemFont(ofSize: 12)
         field.delegate = context.coordinator

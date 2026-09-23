@@ -336,4 +336,112 @@ T.equal("stepping does NOT reload the document", evalOnPage("String(window.__pro
 T.equal("the highlights survive in the live document",
         evalOnPage("document.querySelectorAll('mark.sn-hit').length") as? Int, 3)
 
+// MARK: - Export: the WHOLE note, not the visible part
+
+// The live view above is 600x400. A note taller than that must still come back
+// whole - this is the one thing a takeSnapshot-based export gets wrong, so it is
+// the thing worth asserting.
+if let web = bridgeHost.view {
+    var tallDone = false
+    web.evaluateJavaScript("document.body.insertAdjacentHTML('beforeend', '<div style=\\'height:2400px\\'>tail</div>'); document.documentElement.scrollHeight",
+                           in: nil, in: .defaultClient) { _ in tallDone = true }
+    _ = pump(until: { tallDone }, timeout: 5)
+    pump(0.5)
+
+    var exported: CGImage?
+    var exportFailed: String?
+    Task { @MainActor in
+        do { exported = try await NoteExport.fullPageImage(of: web, scale: 1) }
+        catch { exportFailed = "\(error)" }
+    }
+    let captured = pump(until: { exported != nil || exportFailed != nil }, timeout: 30)
+    T.check("the full-page export produced an image", captured && exported != nil, exportFailed ?? "timed out")
+
+    if let image = exported {
+        T.check("the export is the whole document, not the 400pt on screen",
+                image.height > 1200, "got \(image.height)pt tall")
+        T.check("the export keeps the rendered width", image.width >= 500, "got \(image.width)pt wide")
+
+        let png = FileManager.default.temporaryDirectory.appendingPathComponent("noto-export-test.png")
+        try? FileManager.default.removeItem(at: png)
+        do {
+            try NoteExport.write(image, to: png, format: .png)
+            let size = ((try? FileManager.default.attributesOfItem(atPath: png.path)[.size]) as? Int) ?? 0
+            T.check("PNG lands on disk with real bytes", size > 2000, "got \(size) bytes")
+        } catch {
+            T.check("PNG lands on disk with real bytes", false, "\(error)")
+        }
+        try? FileManager.default.removeItem(at: png)
+
+        // Only where an encoder exists. The menu hides the option on a Mac without
+        // one, so the suite skips it there too instead of failing.
+        if NoteExport.webpEncoder != nil {
+            let webp = FileManager.default.temporaryDirectory.appendingPathComponent("noto-export-test.webp")
+            try? FileManager.default.removeItem(at: webp)
+            do {
+                try NoteExport.write(image, to: webp, format: .webp)
+                let bytes = (try? Data(contentsOf: webp)) ?? Data()
+                T.check("WebP lands on disk", bytes.count > 1000, "got \(bytes.count) bytes")
+                T.check("WebP carries the RIFF/WEBP header",
+                        bytes.count > 12 && Array(bytes[0..<4]) == Array("RIFF".utf8) && Array(bytes[8..<12]) == Array("WEBP".utf8))
+            } catch {
+                T.check("WebP lands on disk", false, "\(error)")
+            }
+            try? FileManager.default.removeItem(at: webp)
+        }
+    }
+}
+
+// Filenames: a title is free text, a filename is not.
+T.equal("slashes never reach the filename", NoteExport.safeName("a/b:c"), "a b c")
+T.equal("an empty title still saves", NoteExport.safeName("   "), "Note")
+T.equal("a normal title is left alone", NoteExport.safeName("Resource Audit - 12h Rollup"), "Resource Audit - 12h Rollup")
+
+// MARK: - The second paste is refused
+
+func cmdV() -> NSEvent {
+    NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                     windowNumber: 0, context: nil, characters: "v", charactersIgnoringModifiers: "v",
+                     isARepeat: false, keyCode: 9)!
+}
+
+let clip = NSPasteboard.general
+clip.clearContents()
+clip.setString("Iframe", forType: .string)
+
+let guarded = GuardedSearchField()
+guarded.stringValue = "Iframe"
+T.check("a paste that repeats the whole field is swallowed", guarded.performKeyEquivalent(with: cmdV()))
+T.equal("the field is left holding one copy", guarded.stringValue, "Iframe")
+
+// Trailing whitespace on either side is still the same paste.
+guarded.stringValue = "Iframe "
+T.check("whitespace does not sneak the repeat through", PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+guarded.stringValue = "iframe"
+T.check("case does not sneak the repeat through", PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+
+// Everything that is a real edit still goes through.
+guarded.stringValue = ""
+T.check("pasting into an empty field is allowed", !PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+guarded.stringValue = "webview"
+T.check("pasting a different word is allowed", !PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+guarded.stringValue = "Iframe Iframe"
+T.check("a field that already differs from the clipboard is allowed",
+        !PasteGuard.blocks(cmdV(), current: guarded.stringValue))
+
+let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                             windowNumber: 0, context: nil, characters: "v", charactersIgnoringModifiers: "v",
+                             isARepeat: false, keyCode: 9)!
+T.check("a plain v is not a paste", !PasteGuard.isPaste(typed))
+
+clip.clearContents()
+T.check("an empty clipboard blocks nothing", !PasteGuard.repeats("Iframe", clipboard: nil))
+T.check("blank clipboard text blocks nothing", !PasteGuard.repeats("Iframe", clipboard: "   "))
+
+let filter = GuardedTextField()
+clip.clearContents()
+clip.setString("Resource Audit", forType: .string)
+filter.stringValue = "Resource Audit"
+T.check("the sidebar filter carries the same guard", filter.performKeyEquivalent(with: cmdV()))
+
 T.report()

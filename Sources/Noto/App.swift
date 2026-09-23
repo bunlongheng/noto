@@ -42,10 +42,29 @@ struct NotoApp: App {
                     .keyboardShortcut("w", modifiers: [.command, .shift])
                     .disabled(state.selected == nil)
                 Divider()
+                Button("Save Note as PNG...") { saveImage(.png) }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(state.selectedNote == nil)
+                if NoteExport.webpEncoder != nil {
+                    Button("Save Note as WebP...") { saveImage(.webp) }
+                        .keyboardShortcut("s", modifiers: [.command, .shift])
+                        .disabled(state.selectedNote == nil)
+                }
+                Divider()
                 Button("Move to Trash") { Dust.dissolve(over: host.view) { await state.trashSelected() } }
                     .keyboardShortcut(.delete, modifiers: .command)
                     .disabled(state.selectedNote == nil || state.selectedNote?.frozen == true)
             }
+        }
+    }
+
+    /// One path for both the menu item and the toolbar item. A cancelled save
+    /// panel comes back with an empty message, which is not worth a toast.
+    private func saveImage(_ format: NoteExport.Format) {
+        guard let note = state.selectedNote else { return }
+        Task {
+            let (kind, message) = await NoteExport.save(note: note.title, from: host.view, format: format)
+            if !message.isEmpty { state.show(kind, message) }
         }
     }
 }
@@ -61,11 +80,24 @@ struct RootView: View {
     /// Tracked so the footer can appear only once the sidebar is gone - with it
     /// open, the list row already says who posted the note and when.
     @State private var columns: NavigationSplitViewVisibility = .all
+    /// The width to come back to, so widening lands where the list was.
+    @State private var wideWidth: CGFloat = 320
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
             NoteListView()
-                .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 480)
+                // 44 is the icon-only floor - the divider drags freely anywhere
+                // between that and 480, and the list re-lays itself out as it goes.
+                .navigationSplitViewColumnWidth(min: 44, ideal: 320, max: 480)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button(action: cycleWidth) {
+                            Image(systemName: "arrow.left.to.line.compact")
+                        }
+                        .help("Squeeze the list: narrow, then icons, then back")
+                        .accessibilityLabel("Narrow note list")
+                    }
+                }
         } detail: {
             VStack(spacing: 0) {
                 // Above the note, not inside it: full screen hides the sidebar, and
@@ -116,6 +148,25 @@ struct RootView: View {
                 Button { state.composerOpen = true } label: { Image(systemName: "square.and.pencil") }
                     .help("New note (Cmd+N)")
                     .accessibilityLabel("New note")
+            }
+            // A plain button when PNG is the only thing this Mac can write, a menu
+            // when cwebp is installed - a one-item menu is a worse button.
+            ToolbarItem(placement: .primaryAction) {
+                Group {
+                    if NoteExport.webpEncoder == nil {
+                        Button { saveImage(.png) } label: { Image(systemName: "square.and.arrow.down") }
+                    } else {
+                        Menu {
+                            Button("PNG") { saveImage(.png) }
+                            Button("WebP") { saveImage(.webp) }
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
+                        }
+                    }
+                }
+                .disabled(state.selectedNote == nil)
+                .help("Save the whole note as an image (Cmd+S)")
+                .accessibilityLabel("Save note as image")
             }
             // The condition wraps the ITEMS, not their contents: an `if` inside a
             // ToolbarItem collapses to an empty item that never appears.
@@ -281,6 +332,47 @@ struct RootView: View {
     ///
     /// A local monitor sees the key before the web view and before the menu, and
     /// returning nil consumes it, so nothing fires twice.
+    /// The toolbar's copy of the File menu item. Same call, same toast.
+    private func saveImage(_ format: NoteExport.Format) {
+        guard let note = state.selectedNote else { return }
+        Task {
+            let (kind, message) = await NoteExport.save(note: note.title, from: host.view, format: format)
+            if !message.isEmpty { state.show(kind, message) }
+        }
+    }
+
+    /// Moving the real divider, not the column-width modifier: setting min == max
+    /// narrows the split but leaves the sidebar's content laid out at the old
+    /// width and clipped at its leading edge. A divider move is what a drag does.
+    ///
+    /// One click walks down the same three stops a drag can land on by hand -
+    /// full, narrow, icons - and the fourth click returns to the width you came
+    /// from. Dragging is never overridden: nothing snaps a hand-set width back.
+    private func cycleWidth() {
+        let windows = [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 } + NSApp.windows
+        guard let split = windows.lazy.compactMap({ Self.splitView(in: $0.contentView) }).first else { return }
+        let current = split.subviews.first?.frame.width ?? 320
+        let next: CGFloat
+        if current > 260 {
+            wideWidth = current
+            next = 150
+        } else if current > 110 {
+            next = 44
+        } else {
+            next = wideWidth
+        }
+        split.setPosition(next, ofDividerAt: 0)
+    }
+
+    private static func splitView(in view: NSView?) -> NSSplitView? {
+        guard let view else { return nil }
+        if let split = view as? NSSplitView, split.subviews.count > 1 { return split }
+        for child in view.subviews {
+            if let found = splitView(in: child) { return found }
+        }
+        return nil
+    }
+
     private func watchKeys() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -339,20 +431,42 @@ struct RootView: View {
     }
 }
 
+/// How much of a row there is room to draw. Read from the real width every frame,
+/// so a hand-drag of the divider changes the layout as it moves - no snapping, and
+/// no separate "compact mode" the width can disagree with.
+enum ListDensity {
+    case full    // icon, title, badges, submitter, date
+    case narrow  // icon and title
+    case icons   // icon only
+
+    init(width: CGFloat) {
+        if width < 110 { self = .icons } else if width < 260 { self = .narrow } else { self = .full }
+    }
+}
+
 struct NoteListView: View {
     @EnvironmentObject var state: AppState
+    @State private var width: CGFloat = 320
+
+    private var density: ListDensity { ListDensity(width: width) }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text(state.viewingTrash ? "Trash" : "All Notes").font(.system(size: 15, weight: .semibold))
-                Text(countLabel)
-                    .font(.system(size: 11, weight: .semibold))
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.15))
-                    .clipShape(Capsule())
+                // At icon width there is no room for either, and a clipped "All
+                // Not..." says less than the icons below it.
+                if density != .icons {
+                    Text(state.viewingTrash ? "Trash" : "All Notes").font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1).fixedSize()
+                    Text(countLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.15))
+                        .clipShape(Capsule())
+                }
                 Spacer()
-                if state.isLoading { ProgressView().scaleEffect(0.5) }
+                if state.isLoading && density != .icons { ProgressView().scaleEffect(0.5) }
                 Button {
                     state.viewingTrash.toggle()
                     if state.viewingTrash { state.loadTrash() } else { state.selectFirstIfNeeded() }
@@ -365,22 +479,40 @@ struct NoteListView: View {
                 Button { state.viewingTrash ? state.loadTrash() : state.load() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
-            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 6)
+            .padding(.horizontal, density == .icons ? 6 : 10)
+            .padding(.top, 10).padding(.bottom, 6)
 
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                FilterField(text: $state.query) { state.stepSelection($0) }
-                    .frame(height: 16)
-                if !state.query.isEmpty {
-                    Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+            // A text field 30pt wide is not a text field. At icon width the row
+            // becomes the button that opens the full search instead.
+            if density == .icons {
+                Button { state.paletteOpen = true } label: {
+                    Image(systemName: "magnifyingglass").font(.system(size: 12))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                .buttonStyle(.plain)
+                .help("Search all notes (Cmd+Shift+F)")
+                .accessibilityLabel("Search all notes")
+                .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+                    FilterField(text: $state.query) { state.stepSelection($0) }
+                        .frame(height: 16)
+                    if !state.query.isEmpty {
+                        Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
+                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(Color.secondary.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
 
             Divider()
 
@@ -409,7 +541,7 @@ struct NoteListView: View {
                 }
                 ScrollViewReader { proxy in
                     List(state.visible, selection: $state.selected) { note in
-                        NoteRow(note: note)
+                        NoteRow(note: note, density: density)
                             .tag(note.id)
                             .listRowBackground(rowBackground(note))
                     }
@@ -424,6 +556,13 @@ struct NoteListView: View {
                 }
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { width = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, w in width = w }
+            }
+        )
     }
 
     private var countLabel: String {
@@ -466,6 +605,7 @@ struct NoteListView: View {
 
 struct NoteRow: View {
     let note: Note
+    var density: ListDensity = .full
 
     // Tight on purpose: every point the trailing columns give back is a point of
     // title the row can show before it truncates.
@@ -475,12 +615,17 @@ struct NoteRow: View {
                 .font(.system(size: 13))
                 .frame(width: 16)
                 .foregroundStyle(tint)
+                // The icon is the whole row now, so it has to carry the title the
+                // row can no longer show.
+                .help(density == .icons ? note.title : "")
 
             // Title only. The folder used to sit under it, which cost every row a
             // second line for something the icon's colour already carries.
-            Text(note.title).font(.system(size: 13)).lineLimit(1)
+            if density != .icons {
+                Text(note.title).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
+            }
 
-            Spacer(minLength: 6)
+            Spacer(minLength: density == .icons ? 0 : 6)
 
             // Fixed columns, not a ragged trailing run: a row with no badges must not
             // slide its submitter icon and date out of line with the row above it.
@@ -494,7 +639,9 @@ struct NoteRow: View {
             // One status glyph, never two locks: LOCK means write-protected, KEY
             // means passcode-gated, GLOBE means public. Same glyphs and the same
             // frozen > private > public priority the web list uses.
-            if note.frozen == true {
+            if density != .full {
+                EmptyView()
+            } else if note.frozen == true {
                 badge("lock.fill", .orange, "Locked - no edits, cannot be trashed")
             } else if note.locked == true {
                 badge("key.fill", Color(nsColor: .systemTeal), "Private - passcode to view")
@@ -502,11 +649,13 @@ struct NoteRow: View {
                 badge("globe", .green, "Public - anyone with the link")
             }
 
-            SubmitterBadge(note: note)
+            if density == .full { SubmitterBadge(note: note) }
 
             // In TRASH the date that matters is the deadline, not the creation time:
             // the server purges on its own 7 day schedule.
-            if let days = note.daysLeft {
+            if density != .full {
+                EmptyView()
+            } else if let days = note.daysLeft {
                 Text(days > 0 ? "\(days)d left" : "expiring")
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
                     .foregroundStyle(days <= 1 ? .red : .orange)
@@ -549,7 +698,7 @@ struct FilterField: NSViewRepresentable {
     let onStep: (Int) -> Void
 
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = GuardedTextField()
         field.placeholderString = "Filter by title"
         field.font = .systemFont(ofSize: 12)
         field.isBordered = false
