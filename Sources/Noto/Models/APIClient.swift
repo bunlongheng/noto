@@ -84,6 +84,24 @@ struct APIClient {
         return all
     }
 
+    /// Only what changed since `since` (a stamp the server handed out). One request
+    /// instead of the ~15-page crawl, and trashed rows come along so the caller can
+    /// drop them.
+    func fetchChanges(since: String) async throws -> DeltaResponse {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        var parts = URLComponents(string: Config.appBaseURL + Config.notesPath)
+        parts?.queryItems = [URLQueryItem(name: "recent", value: "all"), URLQueryItem(name: "since", value: since)]
+        guard let url = parts?.url else { throw APIError.badStatus(0) }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(DeltaResponse.self, from: data)
+    }
+
     /// One note WITH its body. The list endpoint omits content, so this runs only
     /// when a row is selected.
     func fetchNote(id: String) async throws -> Note {

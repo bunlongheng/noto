@@ -19,7 +19,7 @@ struct NotoApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .toolbar) {
-                Button("Refresh") { state.load() }
+                Button("Refresh") { state.refresh() }
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Find in Note") { NotificationCenter.default.post(name: .focusFind, object: nil) }
                     .keyboardShortcut("f", modifiers: .command)
@@ -481,7 +481,7 @@ struct NoteListView: View {
                 .buttonStyle(.plain)
                 .help(state.viewingTrash ? "Back to all notes" : "Show TRASH")
                 .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
-                Button { state.viewingTrash ? state.loadTrash() : state.load() } label: { Image(systemName: "arrow.clockwise") }
+                Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
             .padding(.horizontal, density == .icons ? 6 : 10)

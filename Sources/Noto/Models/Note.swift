@@ -166,3 +166,31 @@ struct NotesResponse: Codable {
     let total: Int?
 }
 struct SingleNoteResponse: Codable { let note: Note }
+/// What `?recent=all&since=` returns: only the rows touched since that instant,
+/// plus the server clock to ask from next time.
+struct DeltaResponse: Codable {
+    let notes: [Note]
+    let syncedAt: String
+}
+
+extension Array where Element == Note {
+    /// Merge a delta into the list. Trashed rows leave, changed rows are replaced
+    /// where they stand, new rows slot in where created_at DESC puts them - the
+    /// same order the server hands out a full crawl in.
+    func applyingChanges(_ changed: [Note]) -> [Note] {
+        var merged = self
+        for note in changed {
+            let index = merged.firstIndex { $0.id == note.id }
+            if note.trashedAt != nil {
+                if let index { merged.remove(at: index) }
+            } else if let index {
+                merged[index] = note
+            } else {
+                let created = note.createdAt ?? ""
+                let at = merged.firstIndex { ($0.createdAt ?? "") < created } ?? merged.count
+                merged.insert(note, at: at)
+            }
+        }
+        return merged
+    }
+}

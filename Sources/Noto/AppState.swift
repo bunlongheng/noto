@@ -48,6 +48,9 @@ final class AppState: ObservableObject {
 
     private let api = APIClient()
     private var loadTask: Task<Void, Never>?
+    /// Where the last pull left off. nil until a full crawl has completed, and
+    /// reset by a failed one, so refresh() knows when it has nothing to merge into.
+    private var syncedAt: String?
     private var lastTrashed: Trashed?
     private let bodies = NSCache<NSString, NSString>()
 
@@ -83,17 +86,44 @@ final class AppState: ObservableObject {
                     self?.selectFirstIfNeeded()
                 }
                 notes = all
+                // The newest updated_at IS the watermark: anything touched later,
+                // trashed included, has a later stamp. Server time, so no clock skew.
+                syncedAt = all.compactMap(\.updatedAt).max()
                 selectFirstIfNeeded()
             } catch is CancellationError {
                 // Superseded by a newer load.
             } catch {
                 // Keep whatever already arrived; a failed page must not blank the list.
                 self.error = error.localizedDescription
+                syncedAt = nil
             }
             isLoading = false
             loadTask = nil
         }
         // Callers await nothing; the task owns its own lifetime.
+    }
+
+    /// Pull only what changed since the last pull and merge it in. Falls back to
+    /// the full crawl when there is nothing to merge into yet. A pull already in
+    /// flight is left alone - it covers this one.
+    func refresh() {
+        guard loadTask == nil else { return }
+        guard let since = syncedAt, !notes.isEmpty else { load(); return }
+        loadTask = Task { [weak self] in
+            guard let self else { return }
+            isLoading = true
+            error = nil
+            do {
+                let delta = try await api.fetchChanges(since: since)
+                notes = notes.applyingChanges(delta.notes)
+                syncedAt = delta.syncedAt
+                selectFirstIfNeeded()
+            } catch {
+                self.error = error.localizedDescription
+            }
+            isLoading = false
+            loadTask = nil
+        }
     }
 
     /// Load TRASH. Cheap enough to refetch on every visit - it holds tens of notes,
@@ -127,7 +157,7 @@ final class AppState: ObservableObject {
             refilter()
             selectFirstIfNeeded()
             show(.success, "Restored to \(folder): \(note.title)")
-            load()                      // and back into the main list it goes
+            refresh()                   // and back into the main list it goes
         } catch {
             show(.failure, "Could not restore it: \(error.localizedDescription)")
         }
