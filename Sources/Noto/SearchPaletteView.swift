@@ -9,14 +9,26 @@ struct SearchPaletteView: View {
     @EnvironmentObject var state: AppState
     @State private var query = ""
     @State private var highlighted = 0
+    /// Body matches from the server, which the local list cannot produce - it holds
+    /// titles and folders, never content.
+    @State private var bodyHits: [Note] = []
+    @State private var searching = false
     @FocusState private var focused: Bool
 
-    /// Capped: the palette is for finding one note, and a list of 1,400 rows is
-    /// not a result, it is the whole database again.
+    /// Titles first, then the notes that only matched in their text. Capped: the
+    /// palette is for finding one note, and a list of 1,400 rows is not a result,
+    /// it is the whole database again.
     private var results: [Note] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return Array(state.notes.prefix(30)) }
-        return Array(state.notes.lazy.filter { $0.searchKey.contains(q) }.prefix(30))
+        let titles = Array(state.notes.lazy.filter { $0.searchKey.contains(q) }.prefix(30))
+        let seen = Set(titles.map(\.id))
+        return titles + bodyHits.filter { !seen.contains($0.id) }.prefix(30)
+    }
+
+    private var titleMatchIDs: Set<Note.ID> {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return Set(state.notes.lazy.filter { $0.searchKey.contains(q) }.map(\.id))
     }
 
     var body: some View {
@@ -30,6 +42,8 @@ struct SearchPaletteView: View {
                 if !results.isEmpty {
                     Divider()
                     list
+                } else if searching {
+                    ProgressView().scaleEffect(0.6).padding(.vertical, 22)
                 } else {
                     Text("No note matches \"\(query)\"")
                         .font(.system(size: 12))
@@ -45,6 +59,19 @@ struct SearchPaletteView: View {
         }
         .onAppear { focused = true; highlighted = 0 }
         .onChange(of: query) { _, _ in highlighted = 0 }
+        // Debounced: one request per pause in typing, not one per keystroke. Two
+        // characters is the floor - "a" would come back with half the database.
+        .task(id: query) {
+            let q = query.trimmingCharacters(in: .whitespaces)
+            guard q.count >= 2 else { bodyHits = []; searching = false; return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            searching = true
+            let hits = await state.searchBodies(q)
+            guard !Task.isCancelled else { return }
+            bodyHits = hits
+            searching = false
+        }
         .onKeyPress(.escape) { close(); return .handled }
         .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }
@@ -74,8 +101,13 @@ struct SearchPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    // Swift's contains("") is FALSE, so an empty query produced an
+                    // empty title-match set and chipped every row as a body hit.
+                    let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+                    let inTitle = titleMatchIDs
                     ForEach(Array(results.enumerated()), id: \.element.id) { index, note in
-                        row(note, active: index == highlighted)
+                        row(note, active: index == highlighted,
+                            inBody: searching && !inTitle.contains(note.id))
                             .id(note.id)
                             .onTapGesture { open(note) }
                     }
@@ -89,7 +121,7 @@ struct SearchPaletteView: View {
         }
     }
 
-    private func row(_ note: Note, active: Bool) -> some View {
+    private func row(_ note: Note, active: Bool, inBody: Bool = false) -> some View {
         HStack(spacing: 10) {
             Image(systemName: NoteIcon.symbol(for: note.icon))
                 .font(.system(size: 13))
@@ -102,6 +134,13 @@ struct SearchPaletteView: View {
                 }
             }
             Spacer()
+            if inBody {
+                Text("in text")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.15), in: Capsule())
+            }
             Text(note.displayDate).font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
