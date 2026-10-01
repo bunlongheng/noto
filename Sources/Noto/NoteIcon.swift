@@ -48,6 +48,7 @@ enum NoteIcon {
         "IdentificationIcon": "person.text.rectangle",
         "QuestionMarkCircleIcon": "questionmark.circle.fill",
         "BoltIcon": "bolt.fill",
+        "EyeIcon": "eye.fill",
         "MusicalNoteIcon": "music.note",
         "CubeTransparentIcon": "cube.transparent",
     ]
