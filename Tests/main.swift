@@ -102,7 +102,7 @@ let heroTokens = [
     "ChatBubbleLeftRightIcon", "ShareIcon", "GlobeAmericasIcon", "DevicePhoneMobileIcon",
     "PhotoIcon", "FilmIcon", "BanknotesIcon", "StarIcon", "PuzzlePieceIcon",
     "SparklesIcon", "IdentificationIcon", "QuestionMarkCircleIcon", "BoltIcon",
-    "MusicalNoteIcon", "CubeTransparentIcon",
+    "MusicalNoteIcon", "CubeTransparentIcon", "UsersIcon", "LockOpenIcon",
 ]
 let appTokens = [
     "repoaudit", "praudit", "skillaudit", "epicaudit", "devaudit", "portfolioaudit",
@@ -110,7 +110,8 @@ let appTokens = [
     "linkedin", "github", "prtrends", "githubstats", "prsummary", "app:fable",
     "app:repo-audit", "app:worldcup26", "app:skill-architect", "app:job",
     "app:incident-report", "app:countries", "app:bheng", "app:rust", "app:react",
-    "app:laravel", "app:next.js", "app:typescript",
+    "app:laravel", "app:next.js", "app:typescript", "app:jobs", "app:sequences",
+    "app:flows", "app:mindmaps",
 ]
 var missing: [String] = []
 var fellBack: [String] = []

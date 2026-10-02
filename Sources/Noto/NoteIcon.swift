@@ -51,6 +51,8 @@ enum NoteIcon {
         "EyeIcon": "eye.fill",
         "MusicalNoteIcon": "music.note",
         "CubeTransparentIcon": "cube.transparent",
+        "UsersIcon": "person.3.fill",
+        "LockOpenIcon": "lock.open.fill",
     ]
 
     private static let app: [String: String] = [
@@ -84,6 +86,10 @@ enum NoteIcon {
         "app:laravel": "chevron.left.forwardslash.chevron.right",
         "app:next.js": "chevron.left.forwardslash.chevron.right",
         "app:typescript": "chevron.left.forwardslash.chevron.right",
+        "app:jobs": "briefcase.fill",
+        "app:sequences": "arrow.left.arrow.right",
+        "app:flows": "arrow.triangle.branch",
+        "app:mindmaps": "point.3.connected.trianglepath.dotted",
     ]
 
     /// An SF Symbol name guaranteed to exist on this system.
