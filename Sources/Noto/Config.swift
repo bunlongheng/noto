@@ -25,6 +25,12 @@ enum Config {
     /// message instead of crashing the app on launch.
     static let apiKey: String? = readEnv("NOTO_API_KEY")
 
+    /// Pusher key and cluster for live updates - the public values the web app
+    /// ships to every browser, not secrets. Optional: with either missing the app
+    /// has no live client and the Refresh button does the work alone.
+    static let pusherKey: String? = readEnv("NOTO_PUSHER_KEY")
+    static let pusherCluster: String? = readEnv("NOTO_PUSHER_CLUSTER")
+
     private static func readEnv(_ key: String) -> String? {
         if let val = ProcessInfo.processInfo.environment[key], !val.isEmpty { return val }
         let path = "\(NSHomeDirectory())/.noto.env"

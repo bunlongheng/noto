@@ -544,4 +544,12 @@ T.suite("deep link") {
     T.equal("link round-trips", AppState.noteID(from: URL(string: AppState.deepLink(for: note))!), "abc")
 }
 
+// MARK: - LiveClient: the Pusher frames it has to recognise
+
+T.equal("live socket url", LiveClient.socketURL(key: "k", cluster: "us2")?.absoluteString,
+        "wss://ws-us2.pusher.com/app/k?protocol=7&client=noto&version=1.0")
+T.equal("live event name", LiveClient.event(in: #"{"event":"note-created","channel":"stickies","data":"{}"}"#), "note-created")
+T.check("live ignores a frame that is not json", LiveClient.event(in: "nope") == nil)
+T.check("live client is nil without a key", LiveClient(key: nil, cluster: "us2") { } == nil)
+
 T.report()
