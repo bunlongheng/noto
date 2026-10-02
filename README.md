@@ -65,8 +65,11 @@ at `http://localhost:4444`.
 | Variable | Required | Where |
 |---|---|---|
 | `NOTO_API_KEY` | yes | environment, or `~/.noto.env` |
+| `NOTO_PUSHER_KEY` | no | same; the server's public Pusher key, turns on live updates |
+| `NOTO_PUSHER_CLUSTER` | no | same; the server's Pusher cluster, e.g. `us2` |
 
-A missing key shows a setup message rather than crashing.
+A missing key shows a setup message rather than crashing. Without the Pusher
+values the app works exactly the same, it just does not update on its own.
 
 ## Design
 

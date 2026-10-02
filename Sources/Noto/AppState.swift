@@ -51,10 +51,18 @@ final class AppState: ObservableObject {
     /// Where the last pull left off. nil until a full crawl has completed, and
     /// reset by a failed one, so refresh() knows when it has nothing to merge into.
     private var syncedAt: String?
+    /// Set when refresh() is asked for while a pull is in flight: that event may
+    /// postdate the stamp the running pull used, so one more pull follows it.
+    private var refreshAgain = false
+    private var live: LiveClient?
     private var lastTrashed: Trashed?
     private let bodies = NSCache<NSString, NSString>()
 
-    init() { bodies.totalCostLimit = 50 * 1024 * 1024 }
+    init() {
+        bodies.totalCostLimit = 50 * 1024 * 1024
+        live = LiveClient(key: Config.pusherKey, cluster: Config.pusherCluster) { [weak self] in self?.refresh() }
+        Task { [live] in await live?.start() }
+    }
 
     var selectedNote: Note? { source.first { $0.id == selected } }
 
@@ -107,7 +115,7 @@ final class AppState: ObservableObject {
     /// the full crawl when there is nothing to merge into yet. A pull already in
     /// flight is left alone - it covers this one.
     func refresh() {
-        guard loadTask == nil else { return }
+        guard loadTask == nil else { refreshAgain = true; return }
         guard let since = syncedAt, !notes.isEmpty else { load(); return }
         loadTask = Task { [weak self] in
             guard let self else { return }
@@ -123,6 +131,7 @@ final class AppState: ObservableObject {
             }
             isLoading = false
             loadTask = nil
+            if refreshAgain { refreshAgain = false; refresh() }
         }
     }
 
