@@ -50,6 +50,9 @@ struct NotoApp: App {
                         .keyboardShortcut("s", modifiers: [.command, .shift])
                         .disabled(state.selectedNote == nil)
                 }
+                Button("Copy Note as SVG") { copyImage() }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(state.selectedNote == nil)
                 Divider()
                 Button("Move to Trash") { Dust.dissolve(over: host.view) { await state.trashSelected() } }
                     .keyboardShortcut(.delete, modifiers: .command)
@@ -65,6 +68,14 @@ struct NotoApp: App {
         Task {
             let (kind, message) = await NoteExport.save(note: note.title, from: host.view, format: format)
             if !message.isEmpty { state.show(kind, message) }
+        }
+    }
+
+    private func copyImage() {
+        guard state.selectedNote != nil else { return }
+        Task {
+            let (kind, message) = await NoteExport.copy(from: host.view)
+            state.show(kind, message)
         }
     }
 }
@@ -152,24 +163,22 @@ struct RootView: View {
                     .help("New note (Cmd+N)")
                     .accessibilityLabel("New note")
             }
-            // A plain button when PNG is the only thing this Mac can write, a menu
-            // when cwebp is installed - a one-item menu is a worse button.
+            // WebP appears only when cwebp is installed. Copy is always there, so
+            // this is a menu even on a Mac that can only write PNG.
             ToolbarItem(placement: .primaryAction) {
-                Group {
-                    if NoteExport.webpEncoder == nil {
-                        Button { saveImage(.png) } label: { Image(systemName: "square.and.arrow.down") }
-                    } else {
-                        Menu {
-                            Button("PNG") { saveImage(.png) }
-                            Button("WebP") { saveImage(.webp) }
-                        } label: {
-                            Image(systemName: "square.and.arrow.down")
-                        }
+                Menu {
+                    Button("PNG") { saveImage(.png) }
+                    if NoteExport.webpEncoder != nil {
+                        Button("WebP") { saveImage(.webp) }
                     }
+                    Divider()
+                    Button("Copy as SVG") { copyImage() }
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
                 }
                 .disabled(state.selectedNote == nil)
-                .help("Save the whole note as an image (Cmd+S)")
-                .accessibilityLabel("Save note as image")
+                .help("Save the whole note as an image (Cmd+S), or copy it as SVG (Cmd+Shift+C)")
+                .accessibilityLabel("Save or copy note as image")
             }
             // The condition wraps the ITEMS, not their contents: an `if` inside a
             // ToolbarItem collapses to an empty item that never appears.
@@ -343,6 +352,14 @@ struct RootView: View {
         Task {
             let (kind, message) = await NoteExport.save(note: note.title, from: host.view, format: format)
             if !message.isEmpty { state.show(kind, message) }
+        }
+    }
+
+    private func copyImage() {
+        guard state.selectedNote != nil else { return }
+        Task {
+            let (kind, message) = await NoteExport.copy(from: host.view)
+            state.show(kind, message)
         }
     }
 

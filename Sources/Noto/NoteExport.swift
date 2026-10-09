@@ -42,11 +42,23 @@ enum NoteExport {
 
     /// Render the full document to a bitmap.
     ///
-    /// Scale is 2x for a retina-sharp file, backed off only when a very long note
+    /// Scale is 3x so the bitmap stays sharp past retina - a browser canvas that
+    /// only takes the PNG can zoom in on it. Backed off only when a very long note
     /// would otherwise ask for a bitmap measured in gigabytes.
     @MainActor
-    static func fullPageImage(of view: WKWebView, scale: CGFloat = 2) async throws -> CGImage {
-        let data = try await view.pdf(configuration: WKPDFConfiguration())
+    static func fullPageImage(of view: WKWebView, scale: CGFloat = 3) async throws -> CGImage {
+        try await render(of: view, scale: scale).image
+    }
+
+    /// Same capture, and also the scale it actually drew at - the copy path needs
+    /// it to state the note's on-screen size next to a retina bitmap.
+    @MainActor
+    static func render(of view: WKWebView, scale: CGFloat) async throws -> (image: CGImage, scale: CGFloat) {
+        try render(pdf: try await view.pdf(configuration: WKPDFConfiguration()), scale: scale)
+    }
+
+    /// The PDF is the vector original; everything below is a raster of it.
+    static func render(pdf data: Data, scale: CGFloat) throws -> (image: CGImage, scale: CGFloat) {
         guard let provider = CGDataProvider(data: data as CFData),
               let doc = CGPDFDocument(provider), doc.numberOfPages > 0 else { throw Failure.noPage }
 
@@ -96,7 +108,7 @@ enum NoteExport {
         }
 
         guard let image = ctx.makeImage() else { throw Failure.bitmap }
-        return image
+        return (image, s)
     }
 
     // MARK: - Write
@@ -123,6 +135,60 @@ enum NoteExport {
                 throw Failure.encode("cwebp exited with code \(task.terminationStatus)")
             }
         }
+    }
+
+    static func pngData(_ image: CGImage) throws -> Data {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
+            throw Failure.encode("could not create the PNG")
+        }
+        CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else { throw Failure.encode("could not encode the PNG") }
+        return data as Data
+    }
+
+    /// The bitmap injected into an SVG wrapper. The SVG is sized in points - what
+    /// the note measures on screen - while the embedded PNG keeps its retina
+    /// pixels, so a paste lands at the right size and stays sharp when scaled.
+    static func svgDocument(png: Data, pixelWidth: Int, pixelHeight: Int, scale: CGFloat) -> String {
+        let w = Int((CGFloat(pixelWidth) / scale).rounded())
+        let h = Int((CGFloat(pixelHeight) / scale).rounded())
+        return """
+        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="\(w)" height="\(h)" viewBox="0 0 \(w) \(h)">
+        <image width="\(w)" height="\(h)" xlink:href="data:image/png;base64,\(png.base64EncodedString())"/>
+        </svg>
+        """
+    }
+
+    // MARK: - Copy
+
+    /// The whole note onto the clipboard in 3 flavours. The PDF is the vector
+    /// WebKit laid out, so a canvas app that takes it stays sharp at any zoom.
+    /// The SVG and PNG are rasters of the same page for the apps that do not.
+    /// No save panel, so no empty message.
+    @MainActor
+    static func copy(from view: WKWebView?) async -> (Toast.Kind, String) {
+        guard let view else { return (.failure, "No note is open") }
+        do {
+            let pdf = try await view.pdf(configuration: WKPDFConfiguration())
+            let (image, scale) = try render(pdf: pdf, scale: 3)
+            let png = try pngData(image)
+            let svg = svgDocument(png: png, pixelWidth: image.width, pixelHeight: image.height, scale: scale)
+            place(pdf: pdf, svg: Data(svg.utf8), png: png, on: .general)
+            return (.success, "Note copied")
+        } catch {
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return (.failure, "Could not copy the note: \(reason)")
+        }
+    }
+
+    static let svgType = NSPasteboard.PasteboardType(UTType.svg.identifier)
+
+    static func place(pdf: Data, svg: Data, png: Data, on board: NSPasteboard) {
+        board.clearContents()
+        board.setData(pdf, forType: .pdf)
+        board.setData(svg, forType: svgType)
+        board.setData(png, forType: .png)
     }
 
     private static func writePNG(_ image: CGImage, to url: URL) throws {

@@ -374,6 +374,27 @@ if let web = bridgeHost.view {
         }
         try? FileManager.default.removeItem(at: png)
 
+        // Copy: the same bitmap injected into an SVG, sized in points, plus a PNG
+        // flavour. A private pasteboard so the suite never clobbers the clipboard.
+        do {
+            let bytes = try NoteExport.pngData(image)
+            let svg = NoteExport.svgDocument(png: bytes, pixelWidth: image.width, pixelHeight: image.height, scale: 1)
+            T.check("SVG parses as XML", (try? XMLDocument(xmlString: svg)) != nil)
+            T.check("SVG states the note's point size", svg.contains("width=\"\(image.width)\" height=\"\(image.height)\""))
+            T.check("SVG carries the PNG inline", svg.contains("data:image/png;base64,\(bytes.prefix(16).base64EncodedString().prefix(20))"))
+            let thirds = NoteExport.svgDocument(png: bytes, pixelWidth: 1500, pixelHeight: 600, scale: 3)
+            T.check("a 3x bitmap is declared at 1x points", thirds.contains("viewBox=\"0 0 500 200\""))
+            let board = NSPasteboard(name: NSPasteboard.Name("noto-test-\(UUID().uuidString)"))
+            let pdf = Data("%PDF-1.4 test".utf8)
+            NoteExport.place(pdf: pdf, svg: Data(svg.utf8), png: bytes, on: board)
+            T.check("clipboard holds the vector PDF flavour", board.data(forType: .pdf) == pdf)
+            T.check("clipboard holds the SVG flavour", board.data(forType: NoteExport.svgType)?.count == svg.utf8.count)
+            T.check("clipboard holds the PNG flavour", board.data(forType: .png)?.count == bytes.count)
+            board.releaseGlobally()
+        } catch {
+            T.check("SVG copy builds", false, "\(error)")
+        }
+
         // Only where an encoder exists. The menu hides the option on a Mac without
         // one, so the suite skips it there too instead of failing.
         if NoteExport.webpEncoder != nil {
