@@ -2,7 +2,7 @@ import AppKit
 
 /// Maps the icon token the API stores on a note to an SF Symbol.
 ///
-/// Stickies stores either "__hero:<HeroiconName>" (the web app renders Heroicons)
+/// The server stores either "__hero:<HeroiconName>" (the web app renders Heroicons)
 /// or "__<app>" / "__app:<name>" for notes posted by a specific tool. Neither set
 /// exists on macOS, so each is mapped to the closest SF Symbol. Every result is
 /// checked against the running system before use - an unavailable symbol name
@@ -48,8 +48,11 @@ enum NoteIcon {
         "IdentificationIcon": "person.text.rectangle",
         "QuestionMarkCircleIcon": "questionmark.circle.fill",
         "BoltIcon": "bolt.fill",
+        "EyeIcon": "eye.fill",
         "MusicalNoteIcon": "music.note",
         "CubeTransparentIcon": "cube.transparent",
+        "UsersIcon": "person.3.fill",
+        "LockOpenIcon": "lock.open.fill",
     ]
 
     private static let app: [String: String] = [
@@ -83,6 +86,10 @@ enum NoteIcon {
         "app:laravel": "chevron.left.forwardslash.chevron.right",
         "app:next.js": "chevron.left.forwardslash.chevron.right",
         "app:typescript": "chevron.left.forwardslash.chevron.right",
+        "app:jobs": "briefcase.fill",
+        "app:sequences": "arrow.left.arrow.right",
+        "app:flows": "arrow.triangle.branch",
+        "app:mindmaps": "point.3.connected.trianglepath.dotted",
     ]
 
     /// An SF Symbol name guaranteed to exist on this system.
