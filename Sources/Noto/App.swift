@@ -11,6 +11,9 @@ struct NotoApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environmentObject(state).environmentObject(host)
+                .onOpenURL { state.open($0) }
+                // Links land in the open window instead of spawning a new one.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
         .defaultSize(width: 1100, height: 780)
         .commands {
@@ -53,6 +56,11 @@ struct NotoApp: App {
                 Button("Copy Note as SVG") { copyImage() }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
                     .disabled(state.selectedNote == nil)
+                Button("Copy Noto Link") {
+                    if let note = state.selectedNote { state.copy(AppState.deepLink(for: note), as: "Noto link copied") }
+                }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(state.selectedNote == nil)
                 Divider()
                 Button("Move to Trash") { Dust.dissolve(over: host.view) { await state.trashSelected() } }
                     .keyboardShortcut(.delete, modifiers: .command)

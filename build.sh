@@ -61,6 +61,17 @@ cat > "$APP_NAME.app/Contents/Info.plist" << 'PLIST'
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.bheng.noto</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>noto</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>NSAppTransportSecurity</key>

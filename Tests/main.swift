@@ -531,4 +531,17 @@ T.suite("delta merge") {
     T.equal("delta response decodes syncedAt", delta.syncedAt, "2026-09-28T21:34:59.313Z")
 }
 
+// MARK: - Deep link: noto://note/<id> is what agents hand out
+
+T.suite("deep link") {
+    T.equal("note link parses", AppState.noteID(from: URL(string: "noto://note/abc-123")!), "abc-123")
+    T.equal("trailing slash is fine", AppState.noteID(from: URL(string: "noto://note/abc/")!), "abc")
+    T.equal("no id is nil", AppState.noteID(from: URL(string: "noto://note")!), nil)
+    T.equal("other host is nil", AppState.noteID(from: URL(string: "noto://folder/abc")!), nil)
+    T.equal("other scheme is nil", AppState.noteID(from: URL(string: "https://note/abc")!), nil)
+    let note = Note(id: "abc", title: "t", folderName: nil, folderColor: nil,
+                    updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil)
+    T.equal("link round-trips", AppState.noteID(from: URL(string: AppState.deepLink(for: note))!), "abc")
+}
+
 T.report()

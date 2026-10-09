@@ -52,6 +52,9 @@ final class AppState: ObservableObject {
     /// reset by a failed one, so refresh() knows when it has nothing to merge into.
     private var syncedAt: String?
     private var lastTrashed: Trashed?
+    /// A noto:// link that arrived before its note did - the list pages in, so a
+    /// cold launch from a link lands before the row exists.
+    private var pendingOpen: Note.ID?
     private let bodies = NSCache<NSString, NSString>()
 
     init() { bodies.totalCostLimit = 50 * 1024 * 1024 }
@@ -194,6 +197,11 @@ final class AppState: ObservableObject {
     /// list is already scrolled to. Only ever fills an EMPTY selection, so a refresh
     /// never yanks the user off the note they are reading.
     func selectFirstIfNeeded() {
+        if let id = pendingOpen, notes.contains(where: { $0.id == id }) {
+            pendingOpen = nil
+            selected = id
+            return
+        }
         guard selected == nil, let first = visible.first else { return }
         selected = first.id
     }
@@ -277,6 +285,31 @@ final class AppState: ObservableObject {
         } catch {
             show(.failure, "Could not create it: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Deep link
+
+    /// The note id in noto://note/<id>, or nil for any other link.
+    static func noteID(from url: URL) -> Note.ID? {
+        guard url.scheme == "noto", url.host == "note" else { return nil }
+        let id = url.pathComponents.dropFirst().first ?? ""
+        return id.isEmpty ? nil : id
+    }
+
+    static func deepLink(for note: Note) -> String { "noto://note/\(note.id)" }
+
+    /// Open the note a noto:// link names. Leaves TRASH and clears the filter and
+    /// any closed tab, since each would otherwise hide the note it asked for.
+    func open(_ url: URL) {
+        guard let id = Self.noteID(from: url) else { return }
+        if viewingTrash { viewingTrash = false }
+        query = ""
+        dismissed.remove(id)
+        refilter()
+        pendingOpen = id
+        selectFirstIfNeeded()
+        // Created after the last pull: fetch the delta so it shows up.
+        if pendingOpen != nil { refresh() }
     }
 
     // MARK: - Share
