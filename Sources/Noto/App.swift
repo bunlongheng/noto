@@ -56,6 +56,9 @@ struct NotoApp: App {
                 Button("Copy Note as SVG") { copyImage() }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
                     .disabled(state.selectedNote == nil)
+                Button("Copy Note for Agent") { copyForAgent() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(state.selectedNote == nil)
                 Button("Copy Noto Link") {
                     if let note = state.selectedNote { state.copy(AppState.deepLink(for: note), as: "Noto link copied") }
                 }
@@ -83,6 +86,15 @@ struct NotoApp: App {
         guard state.selectedNote != nil else { return }
         Task {
             let (kind, message) = await NoteExport.copy(from: host.view)
+            state.show(kind, message)
+        }
+    }
+
+    /// Text only, for pasting into an agent - see AgentText.
+    private func copyForAgent() {
+        guard let note = state.selectedNote else { return }
+        Task {
+            let (kind, message) = await AgentText.copy(title: note.title, from: host.view)
             state.show(kind, message)
         }
     }
@@ -181,11 +193,12 @@ struct RootView: View {
                     }
                     Divider()
                     Button("Copy as SVG") { copyImage() }
+                    Button("Copy for Agent (text)") { copyForAgent() }
                 } label: {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .disabled(state.selectedNote == nil)
-                .help("Save the whole note as an image (Cmd+S), or copy it as SVG (Cmd+Shift+C)")
+                .help("Save the whole note as an image (Cmd+S), copy it as SVG (Cmd+Shift+C), or as text for an agent (Cmd+Shift+T)")
                 .accessibilityLabel("Save or copy note as image")
             }
             // The condition wraps the ITEMS, not their contents: an `if` inside a
@@ -367,6 +380,15 @@ struct RootView: View {
         guard state.selectedNote != nil else { return }
         Task {
             let (kind, message) = await NoteExport.copy(from: host.view)
+            state.show(kind, message)
+        }
+    }
+
+    /// Text only, for pasting into an agent - see AgentText.
+    private func copyForAgent() {
+        guard let note = state.selectedNote else { return }
+        Task {
+            let (kind, message) = await AgentText.copy(title: note.title, from: host.view)
             state.show(kind, message)
         }
     }
