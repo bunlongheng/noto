@@ -24,6 +24,8 @@ final class AppState: ObservableObject {
     @Published var query = "" { didSet { refilter() } }
     @Published var selected: Note.ID?
     @Published var toast: Toast?
+    /// How far through emptying TRASH, 0...1, while the ring is up; nil otherwise.
+    @Published var emptying: Double?
     /// The centred search palette. Lives here rather than in RootView so the menu
     /// command can open it too.
     @Published var paletteOpen = false
@@ -51,13 +53,23 @@ final class AppState: ObservableObject {
     /// Where the last pull left off. nil until a full crawl has completed, and
     /// reset by a failed one, so refresh() knows when it has nothing to merge into.
     private var syncedAt: String?
+    /// Set when refresh() is asked for while a pull is in flight: that event may
+    /// postdate the stamp the running pull used, so one more pull follows it.
+    private var refreshAgain = false
+    private var live: LiveClient?
     private var lastTrashed: Trashed?
     /// A noto:// link that arrived before its note did - the list pages in, so a
     /// cold launch from a link lands before the row exists.
     private var pendingOpen: Note.ID?
     private let bodies = NSCache<NSString, NSString>()
 
-    init() { bodies.totalCostLimit = 50 * 1024 * 1024 }
+    init() {
+        bodies.totalCostLimit = 50 * 1024 * 1024
+        live = LiveClient(key: Config.pusherKey, cluster: Config.pusherCluster,
+                          onDelete: { [weak self] id, folder in self?.drop(id: id, folder: folder) },
+                          onChange: { [weak self] in self?.refresh() })
+        Task { [live] in await live?.start() }
+    }
 
     var selectedNote: Note? { source.first { $0.id == selected } }
 
@@ -110,7 +122,7 @@ final class AppState: ObservableObject {
     /// the full crawl when there is nothing to merge into yet. A pull already in
     /// flight is left alone - it covers this one.
     func refresh() {
-        guard loadTask == nil else { return }
+        guard loadTask == nil else { refreshAgain = true; return }
         guard let since = syncedAt, !notes.isEmpty else { load(); return }
         loadTask = Task { [weak self] in
             guard let self else { return }
@@ -126,7 +138,14 @@ final class AppState: ObservableObject {
             }
             isLoading = false
             loadTask = nil
+            if refreshAgain { refreshAgain = false; refresh() }
         }
+    }
+
+    /// A note (or a folder's notes) deleted outright on the server. A delta pull
+    /// cannot report a row that no longer exists, so without this it stays listed.
+    func drop(id: String?, folder: String?) {
+        notes.removeAll { $0.id == id || (folder != nil && $0.folderName == folder) }
     }
 
     /// Load TRASH. Cheap enough to refetch on every visit - it holds tens of notes,
@@ -169,8 +188,20 @@ final class AppState: ObservableObject {
     /// Delete everything in TRASH, permanently. The caller must have confirmed.
     func emptyTrash() async {
         let count = trashNotes.count
+        emptying = 0
+        // The server deletes in one request, so there is no real progress to read.
+        // The ring fills to 90% while it works, long enough to be seen, and the
+        // last 10% waits for the server's answer.
+        async let deleted: Void = api.emptyTrash()
+        for step in 1...18 {
+            try? await Task.sleep(for: .milliseconds(70))
+            emptying = Double(step) / 20
+        }
         do {
-            try await api.emptyTrash()
+            try await deleted
+            emptying = 1
+            TrashSound.play()
+            try? await Task.sleep(for: .milliseconds(700))
             trashNotes = []
             selected = nil
             refilter()
@@ -178,6 +209,7 @@ final class AppState: ObservableObject {
         } catch {
             show(.failure, "Could not empty TRASH: \(error.localizedDescription)")
         }
+        emptying = nil
     }
 
     /// Walk the visible list by one. Clamps rather than wraps: this drives the

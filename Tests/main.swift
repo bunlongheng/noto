@@ -275,7 +275,9 @@ app.setActivationPolicy(.prohibited)
 let bridgeHost = WebHost()
 let bridgeView = HTMLView(html: noteBody, isHTML: true, host: bridgeHost)
 let hosting = NSHostingView(rootView: bridgeView.frame(width: 600, height: 400))
-let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+// Far off-screen: the web view still renders, but the window never flashes
+// over whatever the person is doing while the suite runs.
+let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 600, height: 400),
                       styleMask: [.borderless], backing: .buffered, defer: false)
 window.contentView = hosting
 window.orderBack(nil)
@@ -542,6 +544,65 @@ T.suite("deep link") {
     let note = Note(id: "abc", title: "t", folderName: nil, folderColor: nil,
                     updatedAt: nil, createdAt: nil, type: nil, content: nil, icon: nil)
     T.equal("link round-trips", AppState.noteID(from: URL(string: AppState.deepLink(for: note))!), "abc")
+}
+
+// MARK: - LiveClient: the Pusher frames it has to recognise
+
+T.equal("live socket url", LiveClient.socketURL(key: "k", cluster: "us2")?.absoluteString,
+        "wss://ws-us2.pusher.com/app/k?protocol=7&client=noto&version=1.0")
+T.equal("live event name", LiveClient.event(in: #"{"event":"note-created","channel":"stickies","data":"{}"}"#), "note-created")
+T.check("live ignores a frame that is not json", LiveClient.event(in: "nope") == nil)
+T.equal("live delete by id", LiveClient.deleted(in: #"{"event":"note-deleted","data":"{\"id\":\"n1\"}"}"#)?.id, "n1")
+T.equal("live delete by folder", LiveClient.deleted(in: #"{"event":"note-deleted","data":"{\"folder_name\":\"Jobs\"}"}"#)?.folder, "Jobs")
+T.check("live delete without a target is nil", LiveClient.deleted(in: #"{"event":"note-deleted","data":"{}"}"#) == nil)
+T.check("live client is nil without a key", LiveClient(key: nil, cluster: "us2") { } == nil)
+
+// MARK: - Copy for agent: text only, nothing that carries content dropped
+
+T.suite("agent text") {
+    let fixture = """
+    <style>.x{color:red}</style><script>window.__x = 1</script>
+    <div style="padding:20px;background:#fff"><h2 style="color:#333">Plan</h2>
+    <p>Ship <strong>today</strong>, see <a href="https://example.com/doc">the doc</a> and https://example.com/raw.</p>
+    <ul><li>one<ul><li>nested</li></ul></li><li>two</li></ul>
+    <table><tr><th>Name</th><th>State</th></tr><tr><td>api | v2</td><td>green</td></tr></table>
+    <details><summary>More</summary><p>hidden detail</p></details>
+    <div style="display:none">tucked away</div>
+    <img src="data:image/png;base64,AAAA" alt="logo"><img src="https://example.com/a.png" alt="chart"><a href="https://react.dev"><img src="https://example.com/r.png" alt="React"></a><a href="https://react.dev">React</a>
+    <p><span style="display:inline-block">Vercel</span><span style="display:inline-block">Postgres</span></p>
+    <table><tr><td><img src="data:image/png;base64,AAAA"></td><td>Only</td></tr></table>
+    <svg><text>Client</text><text>Server</text><text>Client</text></svg>
+    <pre>let x = 1\nlet y = 2</pre></div>
+    """
+    let agent = RenderProbe()
+    agent.run("<!doctype html><html><body>\(fixture)</body></html>")
+    let text = agent.eval(AgentText.script) as? String ?? ""
+    for piece in ["## Plan", "Ship today, see [the doc](https://example.com/doc)", "- one\n  - nested\n- two",
+                  "Name | State\n-|-\napi \\| v2 | green", "hidden detail", "tucked away",
+                  "[image: logo]", "![chart](https://example.com/a.png)", "[diagram: Client · Server]",
+                  "```\nlet x = 1\nlet y = 2\n```"] {
+        T.check("agent text keeps: \(piece.prefix(30))", text.contains(piece), "got:\n\(text)")
+    }
+    T.check("agent text spaces side-by-side chips", text.contains("Vercel Postgres"), "got:\n\(text)")
+    T.check("agent text drops an all-empty column", text.contains("Only") && !text.contains("| Only"), "got:\n\(text)")
+    T.check("agent text drops an icon that repeats its label", !text.contains("r.png") && text.contains("[React](https://react.dev)"), "got:\n\(text)")
+    for gone in ["color", "padding", "window.__x", "base64", "style="] {
+        T.check("agent text drops: \(gone)", !text.contains(gone), "got:\n\(text)")
+    }
+    let plain = RenderProbe()
+    plain.run(#"<!doctype html><html><body><pre class="plain">a  b"# + "\n\nc</pre></body></html>")
+    T.equal("a plain note comes back as typed", plain.eval(AgentText.script) as? String, "a  b\n\nc")
+}
+
+T.suite("empty trash ring") {
+    T.check("the empty-trash sound is on this Mac", FileManager.default.fileExists(atPath: TrashSound.path))
+    for (name, progress) in [("half", 0.5), ("done", 1.0)] {
+        let image = ImageRenderer(content: EmptyTrashRing(progress: progress, count: 12).frame(width: 600, height: 500)).nsImage
+        T.check("the ring draws at \(name)", image != nil)
+        if let dir = ProcessInfo.processInfo.environment["RING_OUT"], let tiff = image?.tiffRepresentation {
+            try? NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/ring-\(name).png"))
+        }
+    }
 }
 
 T.report()
