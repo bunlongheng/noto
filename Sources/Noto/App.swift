@@ -256,6 +256,12 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: state.toast)
         .overlay {
+            if let progress = state.emptying {
+                EmptyTrashRing(progress: progress, count: state.trashNotes.count).transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: state.emptying == nil)
+        .overlay {
             if state.paletteOpen { SearchPaletteView().transition(.opacity) }
         }
         .sheet(isPresented: $state.composerOpen) { NewNoteView() }

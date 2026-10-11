@@ -24,6 +24,8 @@ final class AppState: ObservableObject {
     @Published var query = "" { didSet { refilter() } }
     @Published var selected: Note.ID?
     @Published var toast: Toast?
+    /// How far through emptying TRASH, 0...1, while the ring is up; nil otherwise.
+    @Published var emptying: Double?
     /// The centred search palette. Lives here rather than in RootView so the menu
     /// command can open it too.
     @Published var paletteOpen = false
@@ -186,8 +188,20 @@ final class AppState: ObservableObject {
     /// Delete everything in TRASH, permanently. The caller must have confirmed.
     func emptyTrash() async {
         let count = trashNotes.count
+        emptying = 0
+        // The server deletes in one request, so there is no real progress to read.
+        // The ring fills to 90% while it works, long enough to be seen, and the
+        // last 10% waits for the server's answer.
+        async let deleted: Void = api.emptyTrash()
+        for step in 1...18 {
+            try? await Task.sleep(for: .milliseconds(70))
+            emptying = Double(step) / 20
+        }
         do {
-            try await api.emptyTrash()
+            try await deleted
+            emptying = 1
+            TrashSound.play()
+            try? await Task.sleep(for: .milliseconds(700))
             trashNotes = []
             selected = nil
             refilter()
@@ -195,6 +209,7 @@ final class AppState: ObservableObject {
         } catch {
             show(.failure, "Could not empty TRASH: \(error.localizedDescription)")
         }
+        emptying = nil
     }
 
     /// Walk the visible list by one. Clamps rather than wraps: this drives the

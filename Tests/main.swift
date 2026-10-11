@@ -594,4 +594,15 @@ T.suite("agent text") {
     T.equal("a plain note comes back as typed", plain.eval(AgentText.script) as? String, "a  b\n\nc")
 }
 
+T.suite("empty trash ring") {
+    T.check("the empty-trash sound is on this Mac", FileManager.default.fileExists(atPath: TrashSound.path))
+    for (name, progress) in [("half", 0.5), ("done", 1.0)] {
+        let image = ImageRenderer(content: EmptyTrashRing(progress: progress, count: 12).frame(width: 600, height: 500)).nsImage
+        T.check("the ring draws at \(name)", image != nil)
+        if let dir = ProcessInfo.processInfo.environment["RING_OUT"], let tiff = image?.tiffRepresentation {
+            try? NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/ring-\(name).png"))
+        }
+    }
+}
+
 T.report()
