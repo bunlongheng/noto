@@ -19,15 +19,30 @@ actor LiveClient {
         return obj["event"] as? String
     }
 
+    /// What a note-deleted frame removed: one note by id, or every note in a
+    /// folder. A hard delete never shows up in a delta pull, so the frame is the
+    /// only word the client gets of it. Pusher sends `data` as a JSON string.
+    static func deleted(in text: String) -> (id: String?, folder: String?)? {
+        guard let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              let raw = obj["data"] as? String,
+              let data = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { return nil }
+        let id = data["id"] as? String, folder = data["folder_name"] as? String
+        return id == nil && folder == nil ? nil : (id, folder)
+    }
+
     private let url: URL
     private let onChange: @MainActor @Sendable () -> Void
+    private let onDelete: @MainActor @Sendable (String?, String?) -> Void
     private var loop: Task<Void, Never>?
     private var connections = 0
 
-    init?(key: String?, cluster: String?, onChange: @escaping @MainActor @Sendable () -> Void) {
+    init?(key: String?, cluster: String?,
+          onDelete: @escaping @MainActor @Sendable (String?, String?) -> Void = { _, _ in },
+          onChange: @escaping @MainActor @Sendable () -> Void) {
         guard let key, let cluster, let url = Self.socketURL(key: key, cluster: cluster) else { return nil }
         self.url = url
         self.onChange = onChange
+        self.onDelete = onDelete
     }
 
     func start() {
@@ -67,6 +82,8 @@ actor LiveClient {
                         // A refused key or cluster does not fix itself by retrying.
                         NSLog("Noto live: %@", text)
                         refused = true
+                    case "note-deleted":
+                        if let gone = Self.deleted(in: text) { await onDelete(gone.id, gone.folder) }
                     case let name? where name.hasPrefix("note-"):
                         await onChange()
                     default:

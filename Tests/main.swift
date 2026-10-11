@@ -550,6 +550,9 @@ T.equal("live socket url", LiveClient.socketURL(key: "k", cluster: "us2")?.absol
         "wss://ws-us2.pusher.com/app/k?protocol=7&client=noto&version=1.0")
 T.equal("live event name", LiveClient.event(in: #"{"event":"note-created","channel":"stickies","data":"{}"}"#), "note-created")
 T.check("live ignores a frame that is not json", LiveClient.event(in: "nope") == nil)
+T.equal("live delete by id", LiveClient.deleted(in: #"{"event":"note-deleted","data":"{\"id\":\"n1\"}"}"#)?.id, "n1")
+T.equal("live delete by folder", LiveClient.deleted(in: #"{"event":"note-deleted","data":"{\"folder_name\":\"Jobs\"}"}"#)?.folder, "Jobs")
+T.check("live delete without a target is nil", LiveClient.deleted(in: #"{"event":"note-deleted","data":"{}"}"#) == nil)
 T.check("live client is nil without a key", LiveClient(key: nil, cluster: "us2") { } == nil)
 
 T.report()

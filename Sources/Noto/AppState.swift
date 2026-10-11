@@ -63,7 +63,9 @@ final class AppState: ObservableObject {
 
     init() {
         bodies.totalCostLimit = 50 * 1024 * 1024
-        live = LiveClient(key: Config.pusherKey, cluster: Config.pusherCluster) { [weak self] in self?.refresh() }
+        live = LiveClient(key: Config.pusherKey, cluster: Config.pusherCluster,
+                          onDelete: { [weak self] id, folder in self?.drop(id: id, folder: folder) },
+                          onChange: { [weak self] in self?.refresh() })
         Task { [live] in await live?.start() }
     }
 
@@ -136,6 +138,12 @@ final class AppState: ObservableObject {
             loadTask = nil
             if refreshAgain { refreshAgain = false; refresh() }
         }
+    }
+
+    /// A note (or a folder's notes) deleted outright on the server. A delta pull
+    /// cannot report a row that no longer exists, so without this it stays listed.
+    func drop(id: String?, folder: String?) {
+        notes.removeAll { $0.id == id || (folder != nil && $0.folderName == folder) }
     }
 
     /// Load TRASH. Cheap enough to refetch on every visit - it holds tens of notes,
