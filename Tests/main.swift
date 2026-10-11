@@ -577,14 +577,14 @@ T.suite("agent text") {
     let agent = RenderProbe()
     agent.run("<!doctype html><html><body>\(fixture)</body></html>")
     let text = agent.eval(AgentText.script) as? String ?? ""
-    for piece in ["## Plan", "Ship **today**, see [the doc](https://example.com/doc)", "- one\n  - nested\n- two",
-                  "| Name | State |\n| --- | --- |\n| api \\| v2 | green |", "hidden detail", "tucked away",
+    for piece in ["## Plan", "Ship today, see [the doc](https://example.com/doc)", "- one\n  - nested\n- two",
+                  "Name | State\n-|-\napi \\| v2 | green", "hidden detail", "tucked away",
                   "[image: logo]", "![chart](https://example.com/a.png)", "[diagram: Client · Server]",
                   "```\nlet x = 1\nlet y = 2\n```"] {
         T.check("agent text keeps: \(piece.prefix(30))", text.contains(piece), "got:\n\(text)")
     }
     T.check("agent text spaces side-by-side chips", text.contains("Vercel Postgres"), "got:\n\(text)")
-    T.check("agent text drops an all-empty column", text.contains("| Only |\n| --- |"), "got:\n\(text)")
+    T.check("agent text drops an all-empty column", text.contains("Only") && !text.contains("| Only"), "got:\n\(text)")
     T.check("agent text drops an icon that repeats its label", !text.contains("r.png") && text.contains("[React](https://react.dev)"), "got:\n\(text)")
     for gone in ["color", "padding", "window.__x", "base64", "style="] {
         T.check("agent text drops: \(gone)", !text.contains(gone), "got:\n\(text)")

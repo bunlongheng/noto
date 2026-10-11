@@ -39,8 +39,11 @@ enum AgentText {
         rows = rows.map(r => keep.map(i => r[i] || ""));
         width = keep.length;
         if (!width) return "";
-        const line = r => "| " + [...r, ...Array(width - r.length).fill("")].join(" | ") + " |";
-        const out = [line(rows[0]), "|" + " --- |".repeat(width), ...rows.slice(1).map(line)];
+        // One column is a list of lines; wider is the leanest table Markdown reads:
+        // no outer pipes, a bare "-|-" under the header.
+        if (width === 1) return PARA + rows.map(r => r[0]).filter(Boolean).join("\n") + PARA;
+        const line = r => [...r, ...Array(width - r.length).fill("")].join(" | ");
+        const out = [line(rows[0]), Array(width).fill("-").join("|"), ...rows.slice(1).map(line)];
         return PARA + out.join("\n") + PARA;
       }
 
@@ -80,7 +83,6 @@ enum AgentText {
             if (!/^(https?|mailto|noto):/.test(href) || text === href) return text;
             return `[${text}](${href})`;
           }
-          case "STRONG": case "B": { const t = inline(n).trim(); return t ? `**${t}**` : ""; }
           case "CODE": { const t = n.textContent; return t.includes("\n") ? keep(t) : "`" + t.trim() + "`"; }
           case "PRE":
             // A plain-text note is shown as one <pre class="plain">: hand it back as is.
