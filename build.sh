@@ -61,6 +61,17 @@ cat > "$APP_NAME.app/Contents/Info.plist" << 'PLIST'
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.bheng.noto</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>noto</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>NSAppTransportSecurity</key>
@@ -87,7 +98,20 @@ codesign --verify --strict "$APP_NAME.app"
 echo "Signed: ${SIGN_IDENTITY:-ad-hoc}"
 echo "Created: ./$APP_NAME.app"
 
-if [ "${1:-}" = "--run" ]; then
+# Keep /Applications in step. Without this, a rebuild updated the repo bundle while
+# Launchpad, Spotlight and the Dock kept opening the OLD installed copy. Automatic
+# once installed; --install puts it there the first time.
+INSTALL_DIR="/Applications/$APP_NAME.app"
+if [ -d "$INSTALL_DIR" ] || [ "${1:-}" = "--install" ]; then
+  rm -rf "$INSTALL_DIR"
+  cp -R "$APP_NAME.app" "$INSTALL_DIR"
+  codesign --force --options runtime --timestamp=none --sign "${SIGN_IDENTITY:--}" "$INSTALL_DIR"
+  echo "Installed: $INSTALL_DIR"
+fi
+
+if [ "${1:-}" = "--run" ] || [ "${1:-}" = "--install" ]; then
   echo "Launching..."
-  open "$APP_NAME.app"
+  # The installed copy when there is one: two bundles share an identifier, and
+  # LaunchServices is free to pick either, so be explicit about which one runs.
+  open "$([ -d "$INSTALL_DIR" ] && echo "$INSTALL_DIR" || echo "$APP_NAME.app")"
 fi
