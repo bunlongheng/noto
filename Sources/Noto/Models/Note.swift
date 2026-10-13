@@ -24,9 +24,11 @@ struct Note: Identifiable, Codable, Equatable {
     var trashedAt: String?
     /// Survives the trash move, so it is how a restore finds its way home.
     var folderId: String?
+    /// Hashtags. Only the single-note fetch sends them; list rows leave this nil.
+    var tags: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, type, content, icon, locked, frozen
+        case id, title, type, content, icon, locked, frozen, tags
         case folderName = "folder_name"
         case folderColor = "folder_color"
         case updatedAt = "updated_at"
