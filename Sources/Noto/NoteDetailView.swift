@@ -397,6 +397,9 @@ struct NoteDetailView: View {
                 centered(LaunchTile(note: note))
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if content != nil, !state.viewingTrash { TagBar(note: note) }
+        }
         .navigationTitle(note.title)
         .task(id: note.id) {
             content = nil; error = nil; host.clear()

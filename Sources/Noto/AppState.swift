@@ -24,6 +24,10 @@ final class AppState: ObservableObject {
     @Published var query = "" { didSet { refilter() } }
     @Published var selected: Note.ID?
     @Published var toast: Toast?
+    /// Hashtags by note id, filled by the single-note fetch and edited by the tag bar.
+    @Published var tags: [String: [String]] = [:]
+    /// True while the window is lit green after a copy for an agent.
+    @Published var flashing = false
     /// How far through emptying TRASH, 0...1, while the ring is up; nil otherwise.
     @Published var emptying: Double?
     /// The centred search palette. Lives here rather than in RootView so the menu
@@ -267,9 +271,21 @@ final class AppState: ObservableObject {
     func body(for note: Note) async throws -> String {
         let key = "\(note.id)|\(note.updatedAt ?? "")" as NSString
         if let hit = bodies.object(forKey: key) { return hit as String }
-        let fetched = try await api.fetchNote(id: note.id).content ?? ""
+        let full = try await api.fetchNote(id: note.id)
+        tags[note.id] = full.tags ?? []
+        let fetched = full.content ?? ""
         bodies.setObject(fetched as NSString, forKey: key, cost: fetched.utf8.count)
         return fetched
+    }
+
+    /// Optimistic: the chips change at once and roll back if the server says no.
+    func setTags(_ new: [String], for note: Note) async {
+        let before = tags[note.id]
+        tags[note.id] = new
+        do { try await api.setTags(id: note.id, new) } catch {
+            tags[note.id] = before
+            show(.failure, "Could not save the tags: \(error.localizedDescription)")
+        }
     }
 
     /// Move to TRASH. Not a destructive delete - the server purges trash on its own
@@ -427,6 +443,20 @@ final class AppState: ObservableObject {
             show(.success, "Restored: \(last.note.title)")
         } catch {
             show(.failure, "Could not restore it: \(error.localizedDescription)")
+        }
+    }
+
+    /// Blinks the window green twice, then reports through the toast as usual.
+    func flashCopied(_ kind: Toast.Kind, _ message: String) {
+        show(kind, message)
+        guard kind == .success else { return }
+        Task {
+            for _ in 0..<2 {
+                flashing = true
+                try? await Task.sleep(for: .milliseconds(160))
+                flashing = false
+                try? await Task.sleep(for: .milliseconds(110))
+            }
         }
     }
 

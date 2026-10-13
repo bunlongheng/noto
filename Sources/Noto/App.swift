@@ -53,8 +53,11 @@ struct NotoApp: App {
                         .keyboardShortcut("s", modifiers: [.command, .shift])
                         .disabled(state.selectedNote == nil)
                 }
-                Button("Copy Note as SVG") { copyImage() }
+                Button("Copy Note") { copyNote() }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(state.selectedNote == nil)
+                Button("Copy Note as SVG") { copyImage() }
+                    .keyboardShortcut("c", modifiers: [.command, .shift, .option])
                     .disabled(state.selectedNote == nil)
                 Button("Copy Note for Agent") { copyForAgent() }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
@@ -90,12 +93,21 @@ struct NotoApp: App {
         }
     }
 
+    /// The note as it reads, formatting kept, for pasting into an email - see RichCopy.
+    private func copyNote() {
+        guard state.selectedNote != nil else { return }
+        Task {
+            let (kind, message) = await RichCopy.copy(from: host.view)
+            state.flashCopied(kind, message)
+        }
+    }
+
     /// Text only, for pasting into an agent - see AgentText.
     private func copyForAgent() {
         guard let note = state.selectedNote else { return }
         Task {
             let (kind, message) = await AgentText.copy(title: note.title, from: host.view)
-            state.show(kind, message)
+            state.flashCopied(kind, message)
         }
     }
 }
@@ -183,6 +195,12 @@ struct RootView: View {
                     .help("New note (Cmd+N)")
                     .accessibilityLabel("New note")
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button { copyNote() } label: { Image(systemName: "doc.on.doc") }
+                    .disabled(state.selectedNote == nil)
+                    .help("Copy the note with its formatting, ready to paste into an email (Cmd+Shift+C)")
+                    .accessibilityLabel("Copy note")
+            }
             // WebP appears only when cwebp is installed. Copy is always there, so
             // this is a menu even on a Mac that can only write PNG.
             ToolbarItem(placement: .primaryAction) {
@@ -198,7 +216,7 @@ struct RootView: View {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .disabled(state.selectedNote == nil)
-                .help("Save the whole note as an image (Cmd+S), copy it as SVG (Cmd+Shift+C), or as text for an agent (Cmd+Shift+T)")
+                .help("Save the whole note as an image (Cmd+S), copy it as SVG (Cmd+Option+Shift+C), or as text for an agent (Cmd+Shift+T)")
                 .accessibilityLabel("Save or copy note as image")
             }
             // The condition wraps the ITEMS, not their contents: an `if` inside a
@@ -234,27 +252,14 @@ struct RootView: View {
                 }
             }
         }
-        .overlay(alignment: .bottom) {
-            if let toast = state.toast {
-                HStack(spacing: 8) {
-                    Image(systemName: toast.symbol)
-                        .foregroundStyle(toast.kind == .success ? .green : .orange)
-                    Text(toast.text).lineLimit(2)
-                    if toast.kind == .success, state.canUndoTrash {
-                        Button("Undo") { Task { await state.undoTrash() } }
-                            .buttonStyle(.link)
-                            .keyboardShortcut("z", modifiers: .command)
-                    }
-                }
-                    .font(.callout)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
-                    .shadow(radius: 8, y: 3)
-                    .padding(.bottom, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+        .overlay(alignment: .top) {
+            if let toast = state.toast { IslandToast(toast: toast) }
         }
-        .animation(.easeInOut(duration: 0.2), value: state.toast)
+        .animation(.spring(duration: 0.45, bounce: 0.35), value: state.toast)
+        .overlay {
+            if state.flashing { CopiedFlash().transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.12), value: state.flashing)
         .overlay {
             if let progress = state.emptying {
                 EmptyTrashRing(progress: progress, count: state.trashNotes.count).transition(.opacity)
@@ -390,12 +395,21 @@ struct RootView: View {
         }
     }
 
+    /// The note as it reads, formatting kept, for pasting into an email - see RichCopy.
+    private func copyNote() {
+        guard state.selectedNote != nil else { return }
+        Task {
+            let (kind, message) = await RichCopy.copy(from: host.view)
+            state.flashCopied(kind, message)
+        }
+    }
+
     /// Text only, for pasting into an agent - see AgentText.
     private func copyForAgent() {
         guard let note = state.selectedNote else { return }
         Task {
             let (kind, message) = await AgentText.copy(title: note.title, from: host.view)
-            state.show(kind, message)
+            state.flashCopied(kind, message)
         }
     }
 
