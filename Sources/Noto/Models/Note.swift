@@ -67,6 +67,9 @@ struct Note: Identifiable, Codable, Equatable {
         let f = DateFormatter(); f.dateStyle = .short; f.timeStyle = .none; return f
     }()
 
+    /// The later of updated_at and created_at: the server's All-view sort key.
+    var activityStamp: String { Swift.max(updatedAt ?? "", createdAt ?? "") }
+
     var date: Date? {
         guard let stamp = createdAt ?? updatedAt else { return nil }
         return Note.isoFractional.date(from: stamp) ?? Note.iso.date(from: stamp)
@@ -179,22 +182,17 @@ struct DeltaResponse: Codable {
 }
 
 extension Array where Element == Note {
-    /// Merge a delta into the list. Trashed rows leave, changed rows are replaced
-    /// where they stand, new rows slot in where created_at DESC puts them - the
-    /// same order the server hands out a full crawl in.
+    /// Merge a delta into the list. Trashed rows leave; new and changed rows
+    /// (re)slot where latest-activity DESC puts them - the same order the server
+    /// hands out a full crawl in, so an edited note rises to the top.
     func applyingChanges(_ changed: [Note]) -> [Note] {
         var merged = self
         for note in changed {
-            let index = merged.firstIndex { $0.id == note.id }
-            if note.trashedAt != nil {
-                if let index { merged.remove(at: index) }
-            } else if let index {
-                merged[index] = note
-            } else {
-                let created = note.createdAt ?? ""
-                let at = merged.firstIndex { ($0.createdAt ?? "") < created } ?? merged.count
-                merged.insert(note, at: at)
-            }
+            if let index = merged.firstIndex(where: { $0.id == note.id }) { merged.remove(at: index) }
+            guard note.trashedAt == nil else { continue }
+            let stamp = note.activityStamp
+            let at = merged.firstIndex { $0.activityStamp < stamp } ?? merged.count
+            merged.insert(note, at: at)
         }
         return merged
     }

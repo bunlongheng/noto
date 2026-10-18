@@ -80,7 +80,7 @@ struct APIClient {
             offset += pageSize
             try Task.checkCancellation()
         }
-        // Server order is created_at DESC (the web All view). Never re-sort here.
+        // Server order is latest of updated_at/created_at DESC (the web All view). Never re-sort here.
         return all
     }
 
