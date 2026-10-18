@@ -39,6 +39,7 @@ struct Mascot: View {
 struct IslandToast: View {
     @EnvironmentObject var state: AppState
     let toast: Toast
+    private var tone: Color { toast.kind == .success ? .green : .orange }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -55,9 +56,11 @@ struct IslandToast: View {
         .font(.callout.weight(.medium))
         .foregroundStyle(.white)
         .padding(.leading, 12).padding(.trailing, 18).padding(.vertical, 9)
-        .background(.black, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.45), radius: 14, y: 6)
+        .background(GeometryReader { g in Fireflies(around: g.size) })
+        .background(Capsule().fill(.black).overlay(Capsule().fill(tone.opacity(0.16))))
+        .overlay(Capsule().strokeBorder(tone.opacity(0.85), lineWidth: 1.5))
+        .shadow(color: tone.opacity(0.45), radius: 14, y: 2)
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 6)
         .padding(.top, 10)
         .transition(.scale(scale: 0.4, anchor: .top).combined(with: .opacity))
     }
@@ -75,5 +78,64 @@ struct CopiedFlash: View {
                 .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
         }
         .allowsHitTesting(false)
+    }
+}
+
+/// Colourful motes that burst from the pill's edge, drift out and wink out, then
+/// burst again while the toast is up - the Stickies firefly, around a toast.
+struct Fireflies: View {
+    let around: CGSize
+    @Environment(\.accessibilityReduceMotion) private var stillness
+    @State private var flown = false
+    @State private var motes: [Mote] = []
+
+    private struct Mote: Identifiable {
+        let id = UUID()
+        let color: Color
+        let from: CGSize, to: CGSize
+        let delay: Double, duration: Double
+        let size: CGFloat
+    }
+
+    private static let palette: [Color] = [.green, .mint, .yellow, .cyan, .pink, .orange, .purple]
+
+    private func spawn() -> [Mote] {
+        (0..<16).map { i in
+            let a = Double(i) / 16 * 2 * .pi + .random(in: -0.25...0.25)
+            let x = cos(a) * Double(around.width) / 2, y = sin(a) * Double(around.height) / 2
+            let push = Double.random(in: 28...60)
+            return Mote(color: Fireflies.palette.randomElement()!,
+                        from: CGSize(width: x, height: y),
+                        to: CGSize(width: x + cos(a) * push, height: y + sin(a) * push - 12),
+                        delay: .random(in: 0...0.5), duration: .random(in: 1.4...2.2),
+                        size: .random(in: 5...9))
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            ForEach(motes) { m in
+                Circle().fill(m.color)
+                    .frame(width: m.size, height: m.size)
+                    .shadow(color: m.color, radius: 5)
+                    .offset(flown ? m.to : m.from)
+                    .scaleEffect(flown ? 0.4 : 1)
+                    .animation(.easeOut(duration: m.duration).delay(m.delay), value: flown)
+                    .opacity(flown ? 0 : 1)
+                    .animation(.easeIn(duration: m.duration).delay(m.delay), value: flown)
+            }
+        }
+        .frame(width: around.width, height: around.height)
+        .allowsHitTesting(false)
+        .task {
+            guard !stillness else { return }
+            while !Task.isCancelled {
+                var still = Transaction(); still.disablesAnimations = true
+                withTransaction(still) { motes = spawn(); flown = false }
+                try? await Task.sleep(for: .milliseconds(30))
+                flown = true
+                try? await Task.sleep(for: .seconds(2.4))
+            }
+        }
     }
 }

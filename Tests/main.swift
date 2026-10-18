@@ -511,6 +511,15 @@ func row(_ id: String, created: String, trashed: String? = nil, title: String = 
          type: nil, content: nil, icon: nil, isPublic: nil, locked: nil, frozen: nil,
          createdByKey: nil, createdByMachine: nil, trashedAt: trashed, folderId: nil)
 }
+T.suite("search key") {
+    var n = row("k", created: "2026-10-13T00:00:00.000Z", title: "Email to Vincent")
+    T.equal("no tags: title only", n.searchKey, "email to vincent")
+    n.tags = ["kactus", "Vincent"]
+    T.check("#tag matches", n.searchKey.contains("#kactus"))
+    T.check("tags are case folded", n.searchKey.contains("#vincent"))
+    T.check("a bare word still matches the title", n.searchKey.contains("vincent"))
+}
+
 T.suite("delta merge") {
     let list = [row("c", created: "2026-09-03T00:00:00.000Z"),
                 row("b", created: "2026-09-02T00:00:00.000Z"),

@@ -282,10 +282,17 @@ final class AppState: ObservableObject {
     func setTags(_ new: [String], for note: Note) async {
         let before = tags[note.id]
         tags[note.id] = new
+        setListTags(new, for: note.id)
         do { try await api.setTags(id: note.id, new) } catch {
             tags[note.id] = before
+            setListTags(before ?? [], for: note.id)
             show(.failure, "Could not save the tags: \(error.localizedDescription)")
         }
+    }
+
+    /// Keep the list row in step so "#tag" in the filter sees the edit at once.
+    private func setListTags(_ new: [String], for id: String) {
+        if let i = notes.firstIndex(where: { $0.id == id }) { notes[i].tags = new }
     }
 
     /// Move to TRASH. Not a destructive delete - the server purges trash on its own
