@@ -218,7 +218,17 @@ struct APIClient {
         ])
     }
 
+    private struct TagsPatch: Encodable { let id: String; let tags: [String] }
+    /// Replace a note's hashtags. The column is a text[]; the server takes a JSON array.
+    func setTags(id: String, _ tags: [String]) async throws {
+        try await patch(JSONEncoder().encode(TagsPatch(id: id, tags: tags)))
+    }
+
     private func patch(_ payload: [String: String?]) async throws {
+        try await patch(JSONEncoder().encode(payload))
+    }
+
+    private func patch(_ body: Data) async throws {
         guard let key = Config.apiKey else { throw APIError.noKey }
         guard let url = URL(string: Config.appBaseURL + Config.notesPath) else {
             throw APIError.badStatus(0)
@@ -227,7 +237,7 @@ struct APIClient {
         request.httpMethod = "PATCH"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
+        request.httpBody = body
         request.timeoutInterval = 20
 
         let (_, response) = try await URLSession.shared.data(for: request)

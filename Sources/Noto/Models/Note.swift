@@ -24,9 +24,11 @@ struct Note: Identifiable, Codable, Equatable {
     var trashedAt: String?
     /// Survives the trash move, so it is how a restore finds its way home.
     var folderId: String?
+    /// Hashtags. List rows carry them too, so the filter can match "#tag".
+    var tags: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, type, content, icon, locked, frozen
+        case id, title, type, content, icon, locked, frozen, tags
         case folderName = "folder_name"
         case folderColor = "folder_color"
         case updatedAt = "updated_at"
@@ -110,9 +112,12 @@ struct Note: Identifiable, Codable, Equatable {
         return key
     }
 
-    /// Lowercased title + folder, computed once, so the search filter is a plain
-    /// substring test rather than a locale-aware compare over every note per keystroke.
-    var searchKey: String { (title + " " + (folderName ?? "")).lowercased() }
+    /// Lowercased title + folder + "#tag" tokens, so the search filter is a plain
+    /// substring test and typing "#kactus" finds every note tagged kactus.
+    var searchKey: String {
+        ([title, folderName ?? ""] + (tags ?? []).map { "#" + $0 })
+            .filter { !$0.isEmpty }.joined(separator: " ").lowercased()
+    }
 
     /// Days before the server purges this note for good, or nil when it is not in
     /// TRASH. Matches the web app's "Nd left".
