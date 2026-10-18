@@ -305,7 +305,7 @@ final class AppState: ObservableObject {
     }
 
     /// Write a new plain-text note and open it. The row is inserted at the top
-    /// rather than reloading the whole list - the All view is created_at DESC, so
+    /// rather than reloading the whole list - the All view is latest-activity DESC, so
     /// that is where the server put it too.
     func createNote(title: String, content: String) async {
         do {

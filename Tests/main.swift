@@ -506,8 +506,8 @@ T.check("the share link points at the public deployment",
 
 // MARK: - Delta merge: what a refresh does to the list without a full crawl
 
-func row(_ id: String, created: String, trashed: String? = nil, title: String = "t") -> Note {
-    Note(id: id, title: title, folderName: nil, folderColor: nil, updatedAt: created, createdAt: created,
+func row(_ id: String, created: String, updated: String? = nil, trashed: String? = nil, title: String = "t") -> Note {
+    Note(id: id, title: title, folderName: nil, folderColor: nil, updatedAt: updated ?? created, createdAt: created,
          type: nil, content: nil, icon: nil, isPublic: nil, locked: nil, frozen: nil,
          createdByKey: nil, createdByMachine: nil, trashedAt: trashed, folderId: nil)
 }
@@ -517,15 +517,17 @@ T.suite("delta merge") {
                 row("a", created: "2026-09-01T00:00:00.000Z")]
     T.equal("empty delta leaves the list alone", list.applyingChanges([]).map(\.id), ["c", "b", "a"])
     let edited = list.applyingChanges([row("b", created: "2026-09-02T00:00:00.000Z", title: "renamed")])
-    T.equal("edited row is replaced in place", edited.map(\.id), ["c", "b", "a"])
+    T.equal("same-stamp edit stays in place", edited.map(\.id), ["c", "b", "a"])
     T.equal("edited row carries the new title", edited[1].title, "renamed")
+    let bumped = list.applyingChanges([row("a", created: "2026-09-01T00:00:00.000Z", updated: "2026-09-05T00:00:00.000Z")])
+    T.equal("freshly edited row rises to the top", bumped.map(\.id), ["a", "c", "b"])
     let trashed = list.applyingChanges([row("b", created: "2026-09-02T00:00:00.000Z", trashed: "2026-09-28T00:00:00.000Z")])
     T.equal("trashed row leaves", trashed.map(\.id), ["c", "a"])
     T.equal("trashing an unknown row is a no-op", list.applyingChanges([row("zz", created: "2026-09-09T00:00:00.000Z", trashed: "x")]).count, 3)
     let newest = list.applyingChanges([row("d", created: "2026-09-04T00:00:00.000Z")])
     T.equal("new newest row goes on top", newest.map(\.id), ["d", "c", "b", "a"])
     let middle = list.applyingChanges([row("bc", created: "2026-09-02T12:00:00.000Z")])
-    T.equal("new row slots by created_at DESC", middle.map(\.id), ["c", "bc", "b", "a"])
+    T.equal("new row slots by latest activity DESC", middle.map(\.id), ["c", "bc", "b", "a"])
     let oldest = list.applyingChanges([row("0", created: "2026-08-01T00:00:00.000Z")])
     T.equal("new oldest row goes last", oldest.map(\.id), ["c", "b", "a", "0"])
     let deltaJSON = #"{"notes":[{"id":"x","title":"t"}],"delta":true,"syncedAt":"2026-09-28T21:34:59.313Z"}"#
