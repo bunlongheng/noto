@@ -36,8 +36,8 @@ jobs:
 
       - name: Confirm the binary is universal and signed
         run: |
-          archs=$(lipo -archs StickiesNative)
+          archs=$(lipo -archs Noto)
           echo "archs: $archs"
           echo "$archs" | grep -q arm64
           echo "$archs" | grep -q x86_64
-          codesign --verify --strict StickiesNative.app
+          codesign --verify --strict Noto.app
