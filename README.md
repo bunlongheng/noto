@@ -65,6 +65,7 @@ at `http://localhost:4444`.
 | Variable | Required | Where |
 |---|---|---|
 | `NOTO_API_KEY` | yes | environment, or `~/.noto.env` |
+| `NOTO_SERVER_URL` | no | same; the Stickies server, default `http://localhost:4444` |
 | `NOTO_PUSHER_KEY` | no | same; the server's public Pusher key, turns on live updates |
 | `NOTO_PUSHER_CLUSTER` | no | same; the server's Pusher cluster, e.g. `us2` |
 
