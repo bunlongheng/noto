@@ -1,7 +1,10 @@
 import Foundation
 
 enum Config {
-    static let appBaseURL = "http://localhost:4444"
+    /// Where the Stickies server lives. Defaults to localhost; a machine off the
+    /// home network points NOTO_SERVER_URL (environment or ~/.noto.env) at the
+    /// public deployment instead, e.g. https://stickies-bheng.vercel.app.
+    static let appBaseURL = readEnv("NOTO_SERVER_URL") ?? "http://localhost:4444"
 
     /// The notes endpoint on the server. Spelled once here because it is the
     /// SERVER's route name, not this app's - it stays "stickies" no matter what
