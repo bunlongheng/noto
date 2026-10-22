@@ -83,7 +83,7 @@ struct TabBarView: View {
                 .accessibilityLabel("Close tab")
             }
         }
-        .foregroundStyle(foreground(tint))
+        .foregroundStyle(Ink.ink(on: tint))
         .padding(.horizontal, active ? 9 : 7)
         .frame(height: active ? h + 6 : h)
         .frame(maxWidth: active ? 190 : nil)
@@ -103,9 +103,13 @@ struct TabBarView: View {
         return Color(red: c.r, green: c.g, blue: c.b)
     }
 
-    /// Folder colours run from pale yellow to near-black, so the label has to pick
-    /// its ink from the tab's own luminance instead of always being white.
-    private func foreground(_ tint: Color) -> Color {
+}
+
+/// Folder colours run from pale yellow to near-black, so anything drawn ON a folder
+/// colour - the active tab, the selected sidebar row - picks its ink from that
+/// colour's own luminance instead of always being white.
+enum Ink {
+    static func ink(on tint: Color) -> Color {
         guard let c = NSColor(tint).usingColorSpace(.sRGB) else { return .white }
         let luma = 0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent
         return luma > 0.6 ? Color(red: 0.11, green: 0.11, blue: 0.12) : .white

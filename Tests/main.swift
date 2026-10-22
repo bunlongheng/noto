@@ -616,4 +616,20 @@ T.suite("empty trash ring") {
     }
 }
 
+T.suite("web wrapper parity") {
+    let frag = HTMLView.wrap("<p>hi</p>", isHTML: true)
+    let enforce = "<style>html,body{background:#ffffff!important;color:#1a1a1a!important}</style>"
+    T.check("a fragment gets the web's 67% body zoom", frag.contains("body{zoom:0.67}"))
+    T.check("a fragment gets the web's 15px base size", frag.contains("font-size:15px"))
+    T.check("a fragment has no 18px page padding", !frag.contains("padding:18px"))
+    T.check("the enforce style closes the body", frag.hasSuffix(enforce + "</body></html>"), "got:\n\(frag.suffix(200))")
+    let full = HTMLView.wrap("<!DOCTYPE html><html lang=\"en\"><head><title>x</title></head><body><header>h</header><p>hi</p></body></html>", isHTML: true)
+    T.equal("a full document keeps a single <html", full.components(separatedBy: "<html").count - 1, 1)
+    T.check("a full document still carries the CSP", full.contains("Content-Security-Policy"))
+    T.check("the CSP lands inside the note's own head", full.hasPrefix("<!DOCTYPE html><html lang=\"en\"><head><meta charset"))
+    T.check("a full document ends its body with the enforce style", full.contains(enforce + "</body>"))
+    let plain = HTMLView.wrap("a < b", isHTML: false)
+    T.check("plain text is escaped into pre.plain", plain.contains("<pre class=\"plain\">a &lt; b</pre>"))
+}
+
 T.report()

@@ -274,10 +274,16 @@ struct HTMLView: NSViewRepresentable {
         }
     }
 
-    private var document: String {
-        let body = isHTML ? html : "<pre class=\"plain\">\(escaped(html))</pre>"
-        return """
-        <!doctype html><html><head><meta charset="utf-8">
+    private var document: String { Self.wrap(html, isHTML: isHTML) }
+
+    /// The same wrapper the web app puts round every note (lib/html.ts
+    /// wrapHtmlWithTheme), so a note reads the same here as it does there: 15px
+    /// type, no page padding, and the 67% body zoom the web uses to fit wide
+    /// dashboards. The user's own pageZoom still sits on top of that. Defaults go
+    /// FIRST so author CSS beats them; only the page colours are enforced LAST.
+    static func wrap(_ body: String, isHTML: Bool) -> String {
+        let head = """
+        <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <!-- A note may DRAW but may not PHONE HOME.
              Reports written by the /html skill chart with Chart.js from a CDN and an
@@ -292,14 +298,11 @@ struct HTMLView: NSViewRepresentable {
           /* Notes are authored light-theme only (the /html skill enforces it) and set
              colours on their own elements. Declaring "light dark" let macOS dark mode
              turn the INHERITED text colour white, so every paragraph the note did not
-             colour itself vanished against its own white cards. Pin it light and state
-             the ink explicitly - this is what the web app renders. */
+             colour itself vanished against its own white cards. Pin it light. */
           :root { color-scheme: light; }
-          html { background:#ffffff; }
-          body { margin:0; padding:18px; background:#ffffff; color:#1c1c1e;
-                 font:14px/1.55 -apple-system,BlinkMacSystemFont,system-ui,sans-serif; }
-          img, table { max-width:100%; }
-          pre { overflow-x:auto; }
+          ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.18);border-radius:6px}*{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,0.18) transparent}
+          html,body{background:#ffffff;color:#1a1a1a;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;line-height:1.6;font-size:15px}a{color:#0066cc}body{zoom:0.67}
+          html,body{max-width:100%!important;overflow-x:hidden!important}*,*::before,*::after{box-sizing:border-box}body{overflow-wrap:break-word;word-break:break-word}img,svg,video,canvas,iframe{max-width:100%!important;height:auto}pre{max-width:100%;overflow-x:auto}table{max-width:100%;table-layout:fixed;width:100%}td,th{overflow-wrap:break-word;word-break:break-word}
           pre.plain { white-space:pre-wrap; word-wrap:break-word; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
           /* Every match wears the SAME yellow - two fills (yellow for the rest,
              orange for the current one) read as two kinds of hit rather than one
@@ -307,8 +310,31 @@ struct HTMLView: NSViewRepresentable {
              stands out without changing colour. */
           mark.sn-hit { background:#ffe066; color:#000; border-radius:2px; padding:0 1px; }
           mark.sn-hit.sn-cur { box-shadow:0 0 0 2px #1c1c1e; }
-        </style></head><body>\(body)</body></html>
+        </style>
         """
+        // Injected LAST so a note that hardcoded a dark body still renders light.
+        let enforce = "<style>html,body{background:#ffffff!important;color:#1a1a1a!important}</style>"
+        let regex: String.CompareOptions = [.regularExpression, .caseInsensitive]
+        // A full document goes in as-is with our head spliced into ITS head - nesting
+        // a second <html> inside our <body> is what put a frame round these notes.
+        if isHTML, body.range(of: #"^\s*(<!doctype\s+html|<html[\s>])"#, options: regex) != nil {
+            var doc = body
+            if let r = doc.range(of: #"<head(\s[^>]*)?>"#, options: regex) {
+                doc.insert(contentsOf: head, at: r.upperBound)
+            } else if let r = doc.range(of: #"<html(\s[^>]*)?>"#, options: regex) {
+                doc.insert(contentsOf: "<head>\(head)</head>", at: r.upperBound)
+            } else {
+                doc = head + doc
+            }
+            if let r = doc.range(of: "</body>", options: [.caseInsensitive, .backwards]) {
+                doc.insert(contentsOf: enforce, at: r.lowerBound)
+            } else {
+                doc += enforce
+            }
+            return doc
+        }
+        let content = isHTML ? body : "<pre class=\"plain\">\(escaped(body))</pre>"
+        return "<!doctype html><html><head>\(head)</head><body>\(content)\(enforce)</body></html>"
     }
 
     /// Wraps every match in a <mark>, tracks the current one, scrolls it into view.
@@ -373,7 +399,7 @@ struct HTMLView: NSViewRepresentable {
         """
     }()
 
-    private func escaped(_ s: String) -> String {
+    private static func escaped(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
