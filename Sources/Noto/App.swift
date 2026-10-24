@@ -613,7 +613,7 @@ struct NoteListView: View {
                 }
                 ScrollViewReader { proxy in
                     List(state.visible, selection: $state.selected) { note in
-                        NoteRow(note: note, density: density)
+                        NoteRow(note: note, density: density, selected: state.selected == note.id)
                             .tag(note.id)
                             .listRowBackground(rowBackground(note))
                     }
@@ -643,13 +643,14 @@ struct NoteListView: View {
     }
 
     /// The selected row wears its own folder colour, the way the web list does -
-    /// the system accent blue says nothing about which note this is.
+    /// the system accent blue says nothing about which note this is. Opaque and
+    /// only 2pt in, so even if SelectionStyler loses the race the blue never shows.
     @ViewBuilder
     private func rowBackground(_ note: Note) -> some View {
         if state.selected == note.id {
             RoundedRectangle(cornerRadius: 6)
-                .fill(rowTint(note).opacity(0.28))
-                .padding(.horizontal, 4)
+                .fill(rowTint(note))
+                .padding(.horizontal, 2)
         } else {
             Color.clear
         }
@@ -678,6 +679,9 @@ struct NoteListView: View {
 struct NoteRow: View {
     let note: Note
     var density: ListDensity = .full
+    /// On the selected row the background IS the folder colour, so the icon cannot
+    /// be tinted with it too - everything switches to an ink that reads on it.
+    var selected = false
 
     // Tight on purpose: every point the trailing columns give back is a point of
     // title the row can show before it truncates.
@@ -686,7 +690,7 @@ struct NoteRow: View {
             Image(systemName: NoteIcon.symbol(for: note.icon))
                 .font(.system(size: 13))
                 .frame(width: 16)
-                .foregroundStyle(tint)
+                .foregroundStyle(selected ? ink : tint)
                 // The icon is the whole row now, so it has to carry the title the
                 // row can no longer show.
                 .help(density == .icons ? note.title : "")
@@ -695,6 +699,7 @@ struct NoteRow: View {
             // second line for something the icon's colour already carries.
             if density != .icons {
                 Text(note.title).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(selected ? ink : .primary)
             }
 
             Spacer(minLength: density == .icons ? 0 : 6)
@@ -735,7 +740,7 @@ struct NoteRow: View {
             } else {
                 Text(note.displayDate)
                     .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondary)
                     .frame(width: 50, alignment: .trailing)
             }
         }
@@ -750,6 +755,10 @@ struct NoteRow: View {
             .help(help)
             .accessibilityLabel(help)
     }
+
+    /// Measured against what rowBackground actually paints: the accent when a note has no colour.
+    private var ink: Color { Ink.ink(on: note.parsedColor == nil ? .accentColor : tint) }
+    private var secondary: Color { selected ? ink.opacity(0.75) : .secondary }
 
     /// Keep the folder colour the dot used to carry - now it tints the icon.
     private var tint: Color {
@@ -815,7 +824,9 @@ struct SelectionStyler: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         // Deferred: the view is not in the hierarchy yet when this first runs.
         // NSOutlineView is an NSTableView, so the one cast covers both.
-        DispatchQueue.main.async {
+        // Retried, not tried once: on a cold launch the table can arrive a few
+        // runloops after this view does, and a single miss left the blue on for good.
+        func attempt(_ left: Int) {
             var next: NSView? = view.superview
             while let current = next {
                 if let table = current.descendantTable() {
@@ -824,7 +835,9 @@ struct SelectionStyler: NSViewRepresentable {
                 }
                 next = current.superview
             }
+            if left > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { attempt(left - 1) } }
         }
+        DispatchQueue.main.async { attempt(19) }
     }
 }
 
