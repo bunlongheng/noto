@@ -290,6 +290,19 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Optimistic like setTags: the title changes at once and rolls back on failure.
+    func rename(_ note: Note, to title: String) async {
+        let new = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !new.isEmpty, new != note.title,
+              let i = notes.firstIndex(where: { $0.id == note.id }) else { return }
+        let before = notes[i].title
+        notes[i].title = new
+        do { try await api.setTitle(id: note.id, new) } catch {
+            if let j = notes.firstIndex(where: { $0.id == note.id }) { notes[j].title = before }
+            show(.failure, "Could not rename: \(error.localizedDescription)")
+        }
+    }
+
     /// Keep the list row in step so "#tag" in the filter sees the edit at once.
     private func setListTags(_ new: [String], for id: String) {
         if let i = notes.firstIndex(where: { $0.id == id }) { notes[i].tags = new }

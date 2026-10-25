@@ -224,6 +224,11 @@ struct APIClient {
         try await patch(JSONEncoder().encode(TagsPatch(id: id, tags: tags)))
     }
 
+    /// Rename. Notes are keyed by id, so the title is free text with no uniqueness rule.
+    func setTitle(id: String, _ title: String) async throws {
+        try await patch(["id": id, "title": title])
+    }
+
     private func patch(_ payload: [String: String?]) async throws {
         try await patch(JSONEncoder().encode(payload))
     }
