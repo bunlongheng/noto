@@ -426,7 +426,14 @@ struct NoteDetailView: View {
         .overlay(alignment: .bottomTrailing) {
             if content != nil, !state.viewingTrash { TagBar(note: note) }
         }
-        .navigationTitle(note.title)
+        // Click the title: Rename edits it in place, Copy Title puts it on the pasteboard.
+        .navigationTitle(Binding(
+            get: { note.title },
+            set: { new in Task { await state.rename(note, to: new) } }))
+        .toolbarTitleMenu {
+            Button("Copy Title") { state.copy(note.title, as: "Title copied") }
+            RenameButton()
+        }
         .task(id: note.id) {
             content = nil; error = nil; host.clear()
             do {
