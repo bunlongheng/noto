@@ -413,6 +413,9 @@ struct NoteDetailView: View {
     @State private var content: String?
     @State private var error: String?
     @State private var hovering = false
+    @State private var draftTitle = ""
+    @FocusState private var titleFocused: Bool
+    @State private var detailWidth: CGFloat = 0
 
     var body: some View {
         Group {
@@ -428,14 +431,34 @@ struct NoteDetailView: View {
             if content != nil, !state.viewingTrash { TagBar(note: note, hovering: hovering) }
         }
         .onHover { hovering = $0 }
-        // Click the title: Rename edits it in place, Copy Title puts it on the pasteboard.
-        .navigationTitle(Binding(
-            get: { note.title },
-            set: { new in Task { await state.rename(note, to: new) } }))
-        .toolbarTitleMenu {
-            Button("Copy Title") { state.copy(note.title, as: "Title copied") }
-            RenameButton()
+        // The title is an editable field, like Notes: select and Cmd+C to copy, type and
+        // press Return (or click away) to rename, Esc to put it back.
+        .navigationTitle(note.title)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                TextField("Title", text: $draftTitle)
+                    .textFieldStyle(.plain)
+                    .font(.headline)
+                    .focused($titleFocused)
+                    .onSubmit { commitTitle(); NSApp.keyWindow?.makeFirstResponder(nil) }
+                    // onExitCommand never fires for a field in the toolbar.
+                    .onKeyPress(.escape) { draftTitle = note.title; NSApp.keyWindow?.makeFirstResponder(nil); return .handled }
+                    // NSToolbar sizes items to their content, so a Spacer will not stretch.
+                    // Fill the column minus the 5 action buttons, so they stay on the right.
+                    .frame(width: max(120, detailWidth - 245), alignment: .leading)
+                    .accessibilityLabel("Title")
+            }
         }
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { detailWidth = g.size.width }
+                .onChange(of: g.size.width) { _, w in detailWidth = w }
+        })
+        .modifier(HidesWindowTitle())
+        .onAppear { draftTitle = note.title }
+        .onChange(of: note.id) { draftTitle = note.title }
+        .onChange(of: note.title) { _, t in if !titleFocused { draftTitle = t } }
+        .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
         .task(id: note.id) {
             content = nil; error = nil; host.clear()
             do {
@@ -450,6 +473,11 @@ struct NoteDetailView: View {
         }
     }
 
+    private func commitTitle() {
+        if draftTitle.trimmingCharacters(in: .whitespaces).isEmpty { draftTitle = note.title; return }
+        Task { await state.rename(note, to: draftTitle) }
+    }
+
     private func centered<V: View>(_ v: V) -> some View {
         VStack { Spacer(); v; Spacer() }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -457,4 +485,15 @@ struct NoteDetailView: View {
 
 extension Notification.Name {
     static let focusFind = Notification.Name("focusFind")
+}
+
+/// The title menu stands in for the window title, so drop the plain one where macOS allows it (15+).
+private struct HidesWindowTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
+    }
 }
