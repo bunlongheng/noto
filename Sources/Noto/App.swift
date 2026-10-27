@@ -619,7 +619,7 @@ struct NoteListView: View {
                         NoteRow(note: note, density: density, selected: state.selected == note.id)
                             .tag(note.id)
                             .onHover { inside in
-                                if inside { hovered = note.id } else if hovered == note.id { hovered = nil }
+                                if inside { hovered = note.id; HoverTick.play() } else if hovered == note.id { hovered = nil }
                             }
                             .listRowBackground(rowBackground(note))
                     }
