@@ -59,7 +59,8 @@ enum Whoosh {
 }
 
 /// The tick a list row makes under the pointer - the web list's hover sound:
-/// a 30ms 2400Hz square wave, 12ms attack, throttled to one per 80ms.
+/// 30ms, 12ms attack, throttled to one per 80ms. A sine, not the web's square,
+/// and quieter: the square's harmonics read as noise through Mac speakers.
 @MainActor
 enum HoverTick {
     private static let engine = AVAudioEngine()
@@ -91,13 +92,13 @@ enum HoverTick {
         else { return nil }
         buf.frameLength = buf.frameCapacity
         let samples = buf.floatChannelData![0]
-        let volume: Float = 0.009   // 0.018 at the web's 0.5 master
+        let volume: Float = 0.006
         for i in 0..<Int(buf.frameLength) {
             let t = Float(i) / Float(rate)
-            let square: Float = sinf(2 * .pi * 2400 * t) >= 0 ? 1 : -1
+            let wave = sinf(2 * .pi * 2400 * t)
             // Linear ramp up over 12ms, then an exponential fall to 0.001 by 30ms.
             let envelope = t < 0.012 ? t / 0.012 : (t < 0.03 ? powf(0.001 / volume, (t - 0.012) / 0.018) : 0)
-            samples[i] = square * volume * envelope
+            samples[i] = wave * volume * envelope
         }
         buffer = buf
         return buf
