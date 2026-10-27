@@ -17,6 +17,9 @@ final class WebHost: ObservableObject {
     weak var findField: NSSearchField?
     @Published var matches = 0
     @Published var current = 0
+    /// Bumped each time the web view finishes a load, so the loading veil lifts
+    /// only once the new page is actually drawn.
+    @Published var loads = 0
     /// Page zoom, kept here rather than on the web view so it survives switching
     /// notes - the web view is reused, but a fresh load would otherwise be the
     /// only thing carrying it.
@@ -247,6 +250,9 @@ struct HTMLView: NSViewRepresentable {
         var loadedDocument: String?
         init(host: WebHost) { self.host = host }
 
+        @MainActor
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { host.loads += 1 }
+
         /// A note is a document to read, not a browser. Only the initial
         /// loadHTMLString is allowed in place; a link opens in the default browser
         /// instead of replacing the note with a remote page where the CSP no
@@ -412,19 +418,23 @@ struct NoteDetailView: View {
     @EnvironmentObject var state: AppState
     @State private var content: String?
     @State private var error: String?
+    @State private var loading = true
     @State private var hovering = false
     @State private var draftTitle = ""
     @FocusState private var titleFocused: Bool
     @State private var detailWidth: CGFloat = 0
 
     var body: some View {
-        Group {
+        ZStack {
             if let error {
                 centered(Text(error).foregroundStyle(.secondary))
             } else if let content {
+                // Kept mounted across notes: the next page loads into the same web
+                // view under the veil instead of a fresh one on a black screen.
                 HTMLView(html: content, isHTML: (note.type ?? "") == "html", host: host)
-            } else {
-                centered(LaunchTile(note: note))
+            }
+            if loading, error == nil {
+                LoadingVeil(note: note).transition(.wipeDown)
             }
         }
         .overlay(alignment: .bottomTrailing) {
@@ -459,10 +469,13 @@ struct NoteDetailView: View {
         .onChange(of: note.id) { draftTitle = note.title }
         .onChange(of: note.title) { _, t in if !titleFocused { draftTitle = t } }
         .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
+        .onChange(of: host.loads) { lift() }
         .task(id: note.id) {
-            content = nil; error = nil; host.clear()
+            error = nil; host.clear(); loading = true
             do {
-                content = try await state.body(for: note)
+                let next = try await state.body(for: note)
+                // The same document never reloads, so nothing would lift the veil.
+                if next == content { lift() } else { content = next }
             } catch is CancellationError {
                 // Selection moved on - a superseded load is not an error to show.
             } catch let urlError as URLError where urlError.code == .cancelled {
@@ -471,6 +484,10 @@ struct NoteDetailView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func lift() {
+        withAnimation(.easeOut(duration: 0.45)) { loading = false }
     }
 
     private func commitTitle() {
@@ -495,5 +512,37 @@ private struct HidesWindowTitle: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// Shown while a note loads: whatever page is up stays visible but blurred under a
+/// white wash, with the note's breathing tile on top. Lifts with a top-down wipe.
+private struct LoadingVeil: View {
+    let note: Note
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            Color.white.opacity(0.55)
+            LaunchTile(note: note)
+        }
+        .environment(\.colorScheme, .light)
+    }
+}
+
+/// Clips from the top edge down, so the page underneath is uncovered top first.
+private struct WipeDown: ViewModifier {
+    let progress: CGFloat
+    func body(content: Content) -> some View {
+        content.mask(alignment: .bottom) {
+            Rectangle().scaleEffect(x: 1, y: 1 - progress, anchor: .bottom)
+        }
+    }
+}
+
+extension AnyTransition {
+    static var wipeDown: AnyTransition {
+        .asymmetric(insertion: .identity,
+                    removal: .modifier(active: WipeDown(progress: 1), identity: WipeDown(progress: 0)))
     }
 }
