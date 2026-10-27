@@ -129,6 +129,12 @@ struct RootView: View {
     @State private var columns: NavigationSplitViewVisibility = .all
     /// The width to come back to, so widening lands where the list was.
     @State private var wideWidth: CGFloat = 320
+    @State private var sidebarWidth: CGFloat = 320
+
+    private var countLabel: String {
+        let total = state.viewingTrash ? state.trashNotes.count : state.notes.count
+        return state.query.isEmpty ? "\(total)" : "\(state.visible.count) of \(total)"
+    }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
@@ -136,13 +142,35 @@ struct RootView: View {
                 // 44 is the icon-only floor - the divider drags freely anywhere
                 // between that and 480, and the list re-lays itself out as it goes.
                 .navigationSplitViewColumnWidth(min: 44, ideal: 320, max: 480)
+                .background(GeometryReader { g in
+                    Color.clear
+                        .onAppear { sidebarWidth = g.size.width }
+                        .onChange(of: g.size.width) { _, w in sidebarWidth = w }
+                })
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button(action: cycleWidth) {
-                            Image(systemName: "arrow.left.to.line.compact")
+                    // Title on the left, the column buttons on the right. NSToolbar sizes
+                    // an item to its content, so the row is given the column's width
+                    // minus the traffic lights.
+                    ToolbarItem(placement: .automatic) {
+                        HStack(spacing: 8) {
+                            if sidebarWidth > 150 {
+                                Text(state.viewingTrash ? "Trash" : "All Notes").font(.system(size: 12, weight: .semibold))
+                                    .lineLimit(1).fixedSize()
+                                Text(countLabel)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .lineLimit(1).fixedSize()
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.15))
+                                    .clipShape(Capsule())
+                            }
+                            Spacer(minLength: 0)
+                            Button { columns = .detailOnly } label: { Image(systemName: "sidebar.left") }
+                                .help("Hide the note list").accessibilityLabel("Hide sidebar")
+                            Button(action: cycleWidth) { Image(systemName: "arrow.left.to.line.compact") }
+                                .help("Squeeze the list: narrow, then icons, then back")
+                                .accessibilityLabel("Narrow note list")
                         }
-                        .help("Squeeze the list: narrow, then icons, then back")
-                        .accessibilityLabel("Narrow note list")
+                        .frame(width: max(60, sidebarWidth - 96))
                     }
                 }
         } detail: {
@@ -181,6 +209,9 @@ struct RootView: View {
                 }
             }
         }
+        // The list's own toolbar carries the sidebar button while the list is open;
+        // the system one returns only when the list is hidden, so it can be reopened.
+        .toolbar(removing: columns == .detailOnly ? nil : .sidebarToggle)
         .frame(minWidth: 760, minHeight: 420)
         .task { state.load() }
         .onAppear(perform: watchKeys)
@@ -527,72 +558,52 @@ struct NoteListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // One band, the tab strip's height and colour, so its edge runs across
+            // both columns: the filter, then trash and refresh.
             HStack(spacing: 8) {
-                // At icon width there is no room for either, and a clipped "All
-                // Not..." says less than the icons below it.
-                if density != .icons {
-                    Text(state.viewingTrash ? "Trash" : "All Notes").font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1).fixedSize()
-                    Text(countLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                        .lineLimit(1).fixedSize()
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.15))
-                        .clipShape(Capsule())
+                // A text field 30pt wide is not a text field. At icon width the band
+                // holds only the button that opens the full search instead.
+                if density == .icons {
+                    Button { state.paletteOpen = true } label: {
+                        Image(systemName: "magnifyingglass").font(.system(size: 12))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Search all notes (Cmd+Shift+F)")
+                    .accessibilityLabel("Search all notes")
+                } else {
+                    HStack(spacing: 5) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 10)).foregroundStyle(.secondary)
+                        FilterField(text: $state.query) { state.stepSelection($0) }
+                            .frame(height: 14)
+                        if !state.query.isEmpty {
+                            Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 10)) }
+                                .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+                        }
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.14))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+
+                    if state.isLoading { ProgressView().scaleEffect(0.5).frame(width: 14) }
+                    Button {
+                        state.viewingTrash.toggle()
+                        if state.viewingTrash { state.loadTrash() } else { state.selectFirstIfNeeded() }
+                    } label: {
+                        Image(systemName: state.viewingTrash ? "chevron.backward" : "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .help(state.viewingTrash ? "Back to all notes" : "Show TRASH")
+                    .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
+                    Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
                 }
-                Spacer()
-                if state.isLoading && density != .icons { ProgressView().scaleEffect(0.5) }
-                Button {
-                    state.viewingTrash.toggle()
-                    if state.viewingTrash { state.loadTrash() } else { state.selectFirstIfNeeded() }
-                } label: {
-                    Image(systemName: state.viewingTrash ? "chevron.backward" : "trash")
-                }
-                .buttonStyle(.plain)
-                .help(state.viewingTrash ? "Back to all notes" : "Show TRASH")
-                .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
-                Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
             .padding(.horizontal, density == .icons ? 6 : 10)
-            // Same height and band as the tab strip, so one edge runs across both columns.
+            // Lifted off centre so the gap to the toolbar above matches the gap below.
+            .padding(.bottom, 9)
             .frame(height: 32)
             .background(Color.secondary.opacity(0.16))
-            .padding(.bottom, 6)
-
-            // A text field 30pt wide is not a text field. At icon width the row
-            // becomes the button that opens the full search instead.
-            if density == .icons {
-                Button { state.paletteOpen = true } label: {
-                    Image(systemName: "magnifyingglass").font(.system(size: 12))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .background(Color.secondary.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .help("Search all notes (Cmd+Shift+F)")
-                .accessibilityLabel("Search all notes")
-                .padding(.horizontal, 6)
-                .padding(.bottom, 8)
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                    FilterField(text: $state.query) { state.stepSelection($0) }
-                        .frame(height: 14)
-                    if !state.query.isEmpty {
-                        Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
-                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
-                    }
-                }
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.secondary.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .padding(.horizontal, 10)
-                .padding(.bottom, 6)
-            }
-
-            Divider()
 
             if let error = state.error, state.notes.isEmpty {
                 message(error, systemImage: "exclamationmark.triangle", retry: true)
@@ -629,7 +640,7 @@ struct NoteListView: View {
                             }
                             .listRowBackground(rowBackground(note))
                     }
-                    .listStyle(.inset)
+                    .listStyle(.plain)
                     .background(SelectionStyler())
                     // Arrow-stepping past the bottom of the window would otherwise
                     // move a selection nobody can see.
@@ -647,11 +658,6 @@ struct NoteListView: View {
                     .onChange(of: proxy.size.width) { _, w in width = w }
             }
         )
-    }
-
-    private var countLabel: String {
-        let total = state.viewingTrash ? state.trashNotes.count : state.notes.count
-        return state.query.isEmpty ? "\(total)" : "\(state.visible.count) of \(total)"
     }
 
     /// The selected row wears its own folder colour, the way the web list does -
@@ -847,6 +853,9 @@ struct SelectionStyler: NSViewRepresentable {
                     table.selectionHighlightStyle = .none
                     // No seams between row colours.
                     table.intercellSpacing = .zero
+                    // No dark strip above the first row.
+                    table.enclosingScrollView?.automaticallyAdjustsContentInsets = false
+                    table.enclosingScrollView?.contentInsets = NSEdgeInsets()
                     return
                 }
                 next = current.superview
@@ -941,3 +950,4 @@ struct SubmitterBadge: View {
         .help(note.createdByKey ?? note.createdByMachine ?? "Created in the notes app")
     }
 }
+

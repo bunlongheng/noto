@@ -22,7 +22,7 @@ struct TabBarView: View {
                             tab(note).id(note.id)
                         }
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.trailing, 8)
                     .frame(height: h + 6, alignment: .bottom)
                 }
                 // Selection also moves from the sidebar, the stepper and the arrow
