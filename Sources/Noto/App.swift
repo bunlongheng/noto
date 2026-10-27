@@ -709,7 +709,7 @@ struct NoteRow: View {
         HStack(spacing: 6) {
             NoteIconView(token: note.icon, title: note.title)
                 .font(.system(size: 13))
-                .frame(width: 16)
+                .frame(width: 20, alignment: .center)
                 .foregroundStyle(selected ? ink : tint)
                 // The icon is the whole row now, so it has to carry the title the
                 // row can no longer show.
@@ -765,6 +765,8 @@ struct NoteRow: View {
             }
         }
         .padding(.vertical, 3)
+        // The plain list has no inset of its own; this keeps wide glyphs off the edge.
+        .padding(.leading, 6)
         .accessibilityElement(children: .combine)
     }
 
