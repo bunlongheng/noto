@@ -658,9 +658,9 @@ struct NoteListView: View {
                 .fill(rowTint(note))
                 .padding(.horizontal, 2)
         } else {
-            // Hover wears the note's colour faintly, like the web list (12%, 0.15s).
+            // Hover wears the note's colour at 30%, brighter than the web's 12% to read on macOS.
             RoundedRectangle(cornerRadius: 6)
-                .fill(rowTint(note).opacity(hovered == note.id ? 0.12 : 0))
+                .fill(rowTint(note).opacity(hovered == note.id ? 0.3 : 0))
                 .padding(.horizontal, 2)
                 .animation(.easeOut(duration: 0.15), value: hovered == note.id)
         }
