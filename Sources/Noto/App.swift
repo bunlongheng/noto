@@ -555,7 +555,10 @@ struct NoteListView: View {
                     .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
             }
             .padding(.horizontal, density == .icons ? 6 : 10)
-            .padding(.top, 10).padding(.bottom, 6)
+            // Same height and band as the tab strip, so one edge runs across both columns.
+            .frame(height: 32)
+            .background(Color.secondary.opacity(0.16))
+            .padding(.bottom, 6)
 
             // A text field 30pt wide is not a text field. At icon width the row
             // becomes the button that opens the full search instead.
@@ -576,17 +579,17 @@ struct NoteListView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
                     FilterField(text: $state.query) { state.stepSelection($0) }
-                        .frame(height: 16)
+                        .frame(height: 14)
                     if !state.query.isEmpty {
                         Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
                             .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 5)
+                .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Color.secondary.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
             }
 
             Divider()
@@ -618,6 +621,9 @@ struct NoteListView: View {
                     List(state.visible, selection: $state.selected) { note in
                         NoteRow(note: note, density: density, selected: state.selected == note.id)
                             .tag(note.id)
+                            // Separators run the full width, like the web list's row borders.
+                            .alignmentGuide(.listRowSeparatorLeading) { _ in -20 }
+                            .alignmentGuide(.listRowSeparatorTrailing) { d in d.width + 20 }
                             .onHover { inside in
                                 if inside { hovered = note.id; HoverTick.play() } else if hovered == note.id { hovered = nil }
                             }
@@ -789,7 +795,7 @@ struct FilterField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let field = GuardedTextField()
         field.placeholderString = "Filter by title"
-        field.font = .systemFont(ofSize: 12)
+        field.font = .systemFont(ofSize: 11)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
