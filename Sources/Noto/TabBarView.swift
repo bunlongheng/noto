@@ -88,7 +88,7 @@ struct TabBarView: View {
         .frame(height: active ? h + 6 : h)
         .frame(maxWidth: active ? 190 : nil)
         .background(
-            UnevenRoundedRectangle(topLeadingRadius: 7, topTrailingRadius: 7)
+            Rectangle()
                 .fill(tint.opacity(active ? 1 : 0.55))
         )
         .opacity(active ? 1 : 0.85)
