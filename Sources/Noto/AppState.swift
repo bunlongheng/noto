@@ -449,6 +449,31 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Invites
+
+    func invites(noteId: String) async throws -> [String] {
+        try await api.invites(noteId: noteId)
+    }
+
+    /// Nil on failure, so the sheet keeps the typed email for a retry.
+    func invite(noteId: String, email: String) async -> [String]? {
+        do {
+            let r = try await api.invite(noteId: noteId, email: email)
+            show(.success, "Invited \(email) - email \(r.emailed == true ? "sent" : "not sent")")
+            return r.invites
+        } catch {
+            show(.failure, "Could not invite: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func uninvite(noteId: String, email: String) async -> [String]? {
+        do { return try await api.uninvite(noteId: noteId, email: email) } catch {
+            show(.failure, "Could not remove: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     func copy(_ text: String, as message: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)

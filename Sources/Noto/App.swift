@@ -122,6 +122,7 @@ struct RootView: View {
     /// The passcode prompt for a Private share. A sheet rather than the web app's
     /// window.prompt, and the only share control that needs an answer first.
     @State private var settingPasscode = false
+    @State private var inviting = false
     @State private var findBarOpen = false
     /// Tracked so the footer can appear only once the sidebar is gone - with it
     /// open, the list row already says who posted the note and when.
@@ -237,7 +238,7 @@ struct RootView: View {
                         .accessibilityLabel("Empty trash")
                 }
             } else {
-                ToolbarItem(placement: .primaryAction) { ShareMenu(passcodeSheet: $settingPasscode) }
+                ToolbarItem(placement: .primaryAction) { ShareMenu(passcodeSheet: $settingPasscode, inviteSheet: $inviting) }
                 ToolbarItem(placement: .primaryAction) {
                 // The button asks first; Cmd+Delete does not. A click can land by
                 // accident on a toolbar you were only passing through - the
@@ -271,6 +272,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $state.composerOpen) { NewNoteView() }
         .sheet(isPresented: $settingPasscode) { PasscodeSheet() }
+        .sheet(isPresented: $inviting) { InviteSheet() }
         .confirmationDialog(
             "Move \u{201C}\(state.selectedNote?.title ?? "")\u{201D} to TRASH?",
             isPresented: $confirmingTrash,
@@ -519,6 +521,7 @@ enum ListDensity {
 struct NoteListView: View {
     @EnvironmentObject var state: AppState
     @State private var width: CGFloat = 320
+    @State private var hovered: Note.ID?
 
     private var density: ListDensity { ListDensity(width: width) }
 
@@ -615,6 +618,9 @@ struct NoteListView: View {
                     List(state.visible, selection: $state.selected) { note in
                         NoteRow(note: note, density: density, selected: state.selected == note.id)
                             .tag(note.id)
+                            .onHover { inside in
+                                if inside { hovered = note.id } else if hovered == note.id { hovered = nil }
+                            }
                             .listRowBackground(rowBackground(note))
                     }
                     .listStyle(.inset)
@@ -652,7 +658,11 @@ struct NoteListView: View {
                 .fill(rowTint(note))
                 .padding(.horizontal, 2)
         } else {
-            Color.clear
+            // Hover wears the note's colour faintly, like the web list (12%, 0.15s).
+            RoundedRectangle(cornerRadius: 6)
+                .fill(rowTint(note).opacity(hovered == note.id ? 0.12 : 0))
+                .padding(.horizontal, 2)
+                .animation(.easeOut(duration: 0.15), value: hovered == note.id)
         }
     }
 
