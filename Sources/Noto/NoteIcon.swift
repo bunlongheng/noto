@@ -37,7 +37,7 @@ enum NoteIcon {
         "TableCellsIcon": "tablecells.fill",
         "CalendarDaysIcon": "calendar",
         "ChatBubbleLeftRightIcon": "bubble.left.and.bubble.right.fill",
-        "ShareIcon": "square.and.arrow.up",
+        "ShareIcon": "point.3.connected.trianglepath.dotted",
         "GlobeAmericasIcon": "globe.americas.fill",
         "DevicePhoneMobileIcon": "iphone",
         "PhotoIcon": "photo.fill",
@@ -54,6 +54,34 @@ enum NoteIcon {
         "CubeTransparentIcon": "cube.transparent",
         "UsersIcon": "person.3.fill",
         "LockOpenIcon": "lock.open.fill",
+        "CloudIcon": "cloud.fill",
+        "AcademicCapIcon": "graduationcap.fill",
+        "ArchiveBoxIcon": "archivebox.fill",
+        "BeakerIcon": "flask.fill",
+        "BellIcon": "bell.fill",
+        "BuildingOfficeIcon": "building.2.fill",
+        "ChartBarSquareIcon": "chart.bar.xaxis",
+        "CheckIcon": "checkmark",
+        "ClipboardIcon": "clipboard.fill",
+        "ClockIcon": "clock.fill",
+        "Cog6ToothIcon": "gearshape.fill",
+        "ComputerDesktopIcon": "desktopcomputer",
+        "CpuChipIcon": "cpu.fill",
+        "DocumentDuplicateIcon": "doc.on.doc.fill",
+        "ExclamationTriangleIcon": "exclamationmark.triangle.fill",
+        "FingerPrintIcon": "touchid",
+        "FlagIcon": "flag.fill",
+        "HeartIcon": "heart.fill",
+        "InboxIcon": "tray.fill",
+        "MapPinIcon": "mappin",
+        "RectangleStackIcon": "square.stack.fill",
+        "ServerIcon": "server.rack",
+        "ShieldCheckIcon": "checkmark.shield.fill",
+        "Squares2X2Icon": "square.grid.2x2.fill",
+        "TagIcon": "tag.fill",
+        "TrophyIcon": "trophy.fill",
+        "UserIcon": "person.fill",
+        "WrenchScrewdriverIcon": "wrench.and.screwdriver.fill",
     ]
 
     private static let app: [String: String] = [
@@ -66,6 +94,9 @@ enum NoteIcon {
         "githubaudit": "magnifyingglass.circle.fill",
         "resourceaudit": "magnifyingglass.circle.fill",
         "projectaudit": "magnifyingglass.circle.fill",
+        "securityaudit": "magnifyingglass.circle.fill",
+        "storageaudit": "magnifyingglass.circle.fill",
+        "claude": "sparkle",
         "reporecon": "binoculars.fill",
         "repotest": "checkmark.seal.fill",
         "gmail": "envelope.fill",
@@ -93,9 +124,12 @@ enum NoteIcon {
         "app:mindmaps": "point.3.connected.trianglepath.dotted",
     ]
 
-    /// An SF Symbol name guaranteed to exist on this system.
-    static func symbol(for token: String?) -> String {
-        guard let token, token.hasPrefix("__") else { return fallback }
+    /// An SF Symbol name guaranteed to exist on this system. Mirrors the web
+    /// FolderIconDisplay: "__hero:" and "__<token>" values get a glyph, anything
+    /// else (no icon, or a value the web would not render) shows the title's first
+    /// letter or digit on the note colour, exactly like the web tile.
+    static func symbol(for token: String?, title: String = "") -> String {
+        guard let token, token.hasPrefix("__") else { return initial(title) }
         let body = String(token.dropFirst(2))
         let name = body.hasPrefix("hero:")
             ? hero[String(body.dropFirst(5))]
@@ -104,13 +138,21 @@ enum NoteIcon {
         return name
     }
 
+    /// lib/text.ts meaningfulInitial: first letter or digit, fallback "N".
+    private static func initial(_ title: String) -> String {
+        let first = title.first { $0.isLetter || $0.isNumber }.map { String($0).lowercased() } ?? "n"
+        let name = "\(first).square.fill"
+        return exists(name) ? name : fallback
+    }
+
     /// Tokens drawn by `NoteIconView` because no single SF Symbol fits.
     static func isComposite(_ token: String?) -> Bool { token == "__userrecon" }
 
     /// Computed once, immutable, therefore Sendable - a mutable static cache was
     /// a hard error under the Swift 6 language mode the package declares.
     private static let available: Set<String> = Set(
-        (Array(hero.values) + Array(app.values)).filter {
+        (Array(hero.values) + Array(app.values)
+            + "abcdefghijklmnopqrstuvwxyz0123456789".map { "\($0).square.fill" }).filter {
             NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil
         }
     )
@@ -122,6 +164,7 @@ enum NoteIcon {
 /// is the plain SF Symbol, so `.font` and `.foregroundStyle` apply the same way.
 struct NoteIconView: View {
     let token: String?
+    var title: String = ""
 
     var body: some View {
         if NoteIcon.isComposite(token) {
@@ -134,7 +177,7 @@ struct NoteIconView: View {
                     .scaleEffect(0.42, anchor: UnitPoint(x: 0.345, y: 0.345))
             }
         } else {
-            Image(systemName: NoteIcon.symbol(for: token))
+            Image(systemName: NoteIcon.symbol(for: token, title: title))
         }
     }
 }

@@ -69,7 +69,7 @@ struct TabBarView: View {
         let active = note.id == state.selected
         let tint = color(note)
         HStack(spacing: 5) {
-            NoteIconView(token: note.icon)
+            NoteIconView(token: note.icon, title: note.title)
                 .font(.system(size: 11))
             if active {
                 Text(note.title)

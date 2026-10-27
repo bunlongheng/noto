@@ -687,7 +687,7 @@ struct NoteRow: View {
     // title the row can show before it truncates.
     var body: some View {
         HStack(spacing: 6) {
-            NoteIconView(token: note.icon)
+            NoteIconView(token: note.icon, title: note.title)
                 .font(.system(size: 13))
                 .frame(width: 16)
                 .foregroundStyle(selected ? ink : tint)
