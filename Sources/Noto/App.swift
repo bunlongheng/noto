@@ -521,6 +521,7 @@ enum ListDensity {
 struct NoteListView: View {
     @EnvironmentObject var state: AppState
     @State private var width: CGFloat = 320
+    @State private var hovered: Note.ID?
 
     private var density: ListDensity { ListDensity(width: width) }
 
@@ -617,6 +618,9 @@ struct NoteListView: View {
                     List(state.visible, selection: $state.selected) { note in
                         NoteRow(note: note, density: density, selected: state.selected == note.id)
                             .tag(note.id)
+                            .onHover { inside in
+                                if inside { hovered = note.id } else if hovered == note.id { hovered = nil }
+                            }
                             .listRowBackground(rowBackground(note))
                     }
                     .listStyle(.inset)
@@ -654,7 +658,11 @@ struct NoteListView: View {
                 .fill(rowTint(note))
                 .padding(.horizontal, 2)
         } else {
-            Color.clear
+            // Hover wears the note's colour faintly, like the web list (12%, 0.15s).
+            RoundedRectangle(cornerRadius: 6)
+                .fill(rowTint(note).opacity(hovered == note.id ? 0.12 : 0))
+                .padding(.horizontal, 2)
+                .animation(.easeOut(duration: 0.15), value: hovered == note.id)
         }
     }
 
