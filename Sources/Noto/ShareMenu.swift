@@ -8,6 +8,7 @@ import SwiftUI
 struct ShareMenu: View {
     @EnvironmentObject var state: AppState
     @Binding var passcodeSheet: Bool
+    @Binding var inviteSheet: Bool
 
     var body: some View {
         Menu {
@@ -31,6 +32,11 @@ struct ShareMenu: View {
                     get: { note.frozen == true },
                     set: { on in Task { await state.setFrozen(on) } }))
                     .help("Write-protect: the server refuses edits and the trash move")
+
+                // Same rule as the web Share modal: invites only apply to a passcode-gated link.
+                Button("Invite...") { inviteSheet = true }
+                    .disabled(note.locked != true)
+                    .help("Let an email open the private link without the passcode")
 
                 Divider()
                 Button("Copy Link") {
@@ -93,5 +99,59 @@ struct PasscodeSheet: View {
             }
         }
         .padding(20)
+    }
+}
+
+/// Who may open a Private note's link without the passcode. Calls the same
+/// /api/stickies/invites route as the web Share modal, which emails the invite.
+struct InviteSheet: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var email = ""
+    @State private var invited: [String] = []
+    @State private var busy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Invite").font(.headline)
+            Text("Invited people sign in with their email and a password they pick - no passcode.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(invited, id: \.self) { address in
+                HStack {
+                    Text(address)
+                    Spacer()
+                    Button { Task { await remove(address) } } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Remove \(address)")
+                }
+            }
+            HStack {
+                TextField("name@example.com", text: $email)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await add() } }
+                Button("Invite") { Task { await add() } }
+                    .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 340)
+        .task { if let id = state.selectedNote?.id { invited = (try? await state.invites(noteId: id)) ?? [] } }
+    }
+
+    private func add() async {
+        guard let id = state.selectedNote?.id else { return }
+        let address = email.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !address.isEmpty else { return }
+        busy = true; defer { busy = false }
+        if let list = await state.invite(noteId: id, email: address) { invited = list; email = "" }
+    }
+
+    private func remove(_ address: String) async {
+        guard let id = state.selectedNote?.id else { return }
+        if let list = await state.uninvite(noteId: id, email: address) { invited = list }
     }
 }

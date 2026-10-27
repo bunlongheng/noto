@@ -122,6 +122,7 @@ struct RootView: View {
     /// The passcode prompt for a Private share. A sheet rather than the web app's
     /// window.prompt, and the only share control that needs an answer first.
     @State private var settingPasscode = false
+    @State private var inviting = false
     @State private var findBarOpen = false
     /// Tracked so the footer can appear only once the sidebar is gone - with it
     /// open, the list row already says who posted the note and when.
@@ -237,7 +238,7 @@ struct RootView: View {
                         .accessibilityLabel("Empty trash")
                 }
             } else {
-                ToolbarItem(placement: .primaryAction) { ShareMenu(passcodeSheet: $settingPasscode) }
+                ToolbarItem(placement: .primaryAction) { ShareMenu(passcodeSheet: $settingPasscode, inviteSheet: $inviting) }
                 ToolbarItem(placement: .primaryAction) {
                 // The button asks first; Cmd+Delete does not. A click can land by
                 // accident on a toolbar you were only passing through - the
@@ -271,6 +272,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $state.composerOpen) { NewNoteView() }
         .sheet(isPresented: $settingPasscode) { PasscodeSheet() }
+        .sheet(isPresented: $inviting) { InviteSheet() }
         .confirmationDialog(
             "Move \u{201C}\(state.selectedNote?.title ?? "")\u{201D} to TRASH?",
             isPresented: $confirmingTrash,

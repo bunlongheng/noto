@@ -17,6 +17,7 @@ enum Config {
     /// A keyless request is trusted from this machine alone, which is the same
     /// guarantee emptyTrash already relies on.
     static let ownerPath = "/api/stickies"
+    static let invitesPath = "/api/stickies/invites"
 
     /// Where a shared note is READ from. A link to localhost is useless to whoever
     /// it is sent to, so the copied URL always points at the public deployment -

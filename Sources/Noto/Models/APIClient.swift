@@ -287,4 +287,51 @@ struct APIClient {
         if http.statusCode == 423 { throw APIError.locked }
         guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
     }
+
+    // MARK: - Invites
+
+    /// The same owner route the web Share modal uses. Invited emails open the
+    /// passcode-gated link with their own sign-in instead of the passcode.
+    func invites(noteId: String) async throws -> [String] {
+        var parts = URLComponents(string: Config.appBaseURL + Config.invitesPath)
+        parts?.queryItems = [URLQueryItem(name: "noteId", value: noteId)]
+        return try await inviteRequest(parts?.url, method: "GET").invites
+    }
+
+    /// Invite an email; `emailed` says whether the invite mail actually went out.
+    func invite(noteId: String, email: String) async throws -> InvitesResponse {
+        let body = try JSONEncoder().encode(["noteId": noteId, "email": email])
+        return try await inviteRequest(URL(string: Config.appBaseURL + Config.invitesPath), method: "POST", body: body)
+    }
+
+    func uninvite(noteId: String, email: String) async throws -> [String] {
+        var parts = URLComponents(string: Config.appBaseURL + Config.invitesPath)
+        parts?.queryItems = [URLQueryItem(name: "noteId", value: noteId), URLQueryItem(name: "email", value: email)]
+        return try await inviteRequest(parts?.url, method: "DELETE").invites
+    }
+
+    private func inviteRequest(_ url: URL?, method: String, body: Data? = nil) async throws -> InvitesResponse {
+        guard let key = Config.apiKey else { throw APIError.noKey }
+        guard let url else { throw APIError.badStatus(0) }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        request.timeoutInterval = 20
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus(0) }
+        guard (200...299).contains(http.statusCode) else { throw APIError.badStatus(http.statusCode) }
+        return try JSONDecoder().decode(InvitesResponse.self, from: data)
+    }
+}
+
+struct InvitesResponse: Decodable, Sendable {
+    struct Row: Decodable, Sendable { let email: String }
+    let rows: [Row]
+    let emailed: Bool?
+    var invites: [String] { rows.map(\.email) }
+
+    enum CodingKeys: String, CodingKey { case rows = "invites", emailed }
 }
