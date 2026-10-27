@@ -263,6 +263,13 @@ struct APIClient {
     /// everything else comes back 200 having changed nothing at all. The keyless
     /// path is trusted only from this machine - the same route emptyTrash takes.
     func setShare(id: String, _ fields: ShareFields) async throws {
+        // Publish / freeze alone go keyed: the server lets the key set is_public, so
+        // "copy link" works off the home network. The passcode gate stays owner-only.
+        if fields.locked == nil && fields.passcode == nil {
+            var body = fields
+            body.id = id
+            return try await patch(JSONEncoder().encode(body))
+        }
         guard let url = URL(string: Config.appBaseURL + Config.ownerPath) else {
             throw APIError.badStatus(0)
         }

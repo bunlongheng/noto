@@ -123,7 +123,7 @@ struct SearchPaletteView: View {
 
     private func row(_ note: Note, active: Bool, inBody: Bool = false) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: NoteIcon.symbol(for: note.icon, title: note.title))
+            NoteIconView(token: note.icon, title: note.title)
                 .font(.system(size: 13))
                 .frame(width: 18)
                 .foregroundStyle(tint(note))

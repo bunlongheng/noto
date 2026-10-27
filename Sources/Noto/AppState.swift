@@ -394,11 +394,11 @@ final class AppState: ObservableObject {
         guard let note = selectedNote else { return }
         var fields = ShareFields(isPublic: on)
         if !on { fields.locked = false }
-        await write(fields, to: note, then: { n in
+        let ok = await write(fields, to: note, then: { n in
             n.isPublic = on
             if !on { n.locked = false }
         }, saying: on ? "Public - anyone with the link" : "No longer shared")
-        if on { copy(shareURL(for: note), as: "Link copied") }
+        if on, ok { copy(shareURL(for: note), as: "Link copied") }
     }
 
     /// Gate the share behind a passcode, or drop the gate. Locking implies sharing,
@@ -413,12 +413,12 @@ final class AppState: ObservableObject {
             fields.passcode = passcode
             if !wasPublic { fields.isPublic = true }
         }
-        await write(fields, to: note, then: { n in
+        let ok = await write(fields, to: note, then: { n in
             n.locked = on
             if on { n.isPublic = true }
         }, saying: on ? (passcode.isEmpty ? "Private - shared, no passcode" : "Private - passcode required")
                       : "Public - no passcode")
-        if on, !wasPublic { copy(shareURL(for: note), as: "Link copied") }
+        if on, !wasPublic, ok { copy(shareURL(for: note), as: "Link copied") }
     }
 
     /// Write-protect, or release it. The server refuses every edit AND the trash
@@ -433,15 +433,19 @@ final class AppState: ObservableObject {
 
     /// One path for all three toggles: send it, then mirror it onto the row in
     /// place. A reload would cost a full 2.6s crawl to show one changed badge.
+    /// True when the server took the change, so callers copy a link only once it works.
+    @discardableResult
     private func write(_ fields: ShareFields, to note: Note,
-                       then apply: (inout Note) -> Void, saying message: String) async {
+                       then apply: (inout Note) -> Void, saying message: String) async -> Bool {
         do {
             try await api.setShare(id: note.id, fields)
             if let i = notes.firstIndex(where: { $0.id == note.id }) { apply(&notes[i]) }
             if let i = trashNotes.firstIndex(where: { $0.id == note.id }) { apply(&trashNotes[i]) }
             show(.success, message)
+            return true
         } catch {
             show(.failure, "Could not change sharing: \(error.localizedDescription)")
+            return false
         }
     }
 
