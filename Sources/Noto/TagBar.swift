@@ -5,6 +5,8 @@ import SwiftUI
 /// folder colour so the chips read as part of the note.
 struct TagBar: View {
     let note: Note
+    /// The pointer is over the note: an empty bar only appears then, a full one goes opaque.
+    var hovering = false
     @EnvironmentObject var state: AppState
     @State private var adding = false
     @State private var draft = ""
@@ -18,6 +20,15 @@ struct TagBar: View {
     }
 
     var body: some View {
+        if tags.isEmpty && !hovering && !adding {
+            EmptyView()
+        } else {
+            bar.opacity(hovering || adding ? 1 : 0.25)
+                .animation(.easeOut(duration: 0.2), value: hovering)
+        }
+    }
+
+    private var bar: some View {
         HStack(spacing: 6) {
             ForEach(tags, id: \.self) { tag in
                 HStack(spacing: 4) {

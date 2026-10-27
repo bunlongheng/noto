@@ -412,6 +412,7 @@ struct NoteDetailView: View {
     @EnvironmentObject var state: AppState
     @State private var content: String?
     @State private var error: String?
+    @State private var hovering = false
 
     var body: some View {
         Group {
@@ -424,8 +425,9 @@ struct NoteDetailView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if content != nil, !state.viewingTrash { TagBar(note: note) }
+            if content != nil, !state.viewingTrash { TagBar(note: note, hovering: hovering) }
         }
+        .onHover { hovering = $0 }
         // Click the title: Rename edits it in place, Copy Title puts it on the pasteboard.
         .navigationTitle(Binding(
             get: { note.title },
