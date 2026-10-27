@@ -649,19 +649,17 @@ struct NoteListView: View {
     }
 
     /// The selected row wears its own folder colour, the way the web list does -
-    /// the system accent blue says nothing about which note this is. Opaque and
-    /// only 2pt in, so even if SelectionStyler loses the race the blue never shows.
+    /// the system accent blue says nothing about which note this is. Edge to edge,
+    /// with SelectionStyler zeroing the row gaps, so colours meet like Stickies rows.
     @ViewBuilder
     private func rowBackground(_ note: Note) -> some View {
         if state.selected == note.id {
             Rectangle()
                 .fill(rowTint(note))
-                .padding(.horizontal, 2)
         } else {
             // Hover wears the note's colour at 30%, brighter than the web's 12% to read on macOS.
             Rectangle()
                 .fill(rowTint(note).opacity(hovered == note.id ? 0.3 : 0))
-                .padding(.horizontal, 2)
                 .animation(.easeOut(duration: 0.15), value: hovered == note.id)
         }
     }
@@ -841,6 +839,8 @@ struct SelectionStyler: NSViewRepresentable {
             while let current = next {
                 if let table = current.descendantTable() {
                     table.selectionHighlightStyle = .none
+                    // No seams between row colours.
+                    table.intercellSpacing = .zero
                     return
                 }
                 next = current.superview
