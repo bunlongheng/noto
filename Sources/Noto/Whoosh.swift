@@ -57,3 +57,49 @@ enum Whoosh {
         return buf
     }
 }
+
+/// The tick a list row makes under the pointer - the web list's hover sound:
+/// a 30ms 2400Hz square wave, 12ms attack, throttled to one per 80ms.
+@MainActor
+enum HoverTick {
+    private static let engine = AVAudioEngine()
+    private static let player = AVAudioPlayerNode()
+    private static var buffer: AVAudioPCMBuffer?
+    private static var wired = false
+    private static var last = Date.distantPast
+
+    static func play() {
+        guard Date().timeIntervalSince(last) >= 0.08 else { return }
+        last = Date()
+        guard let buffer = buffer ?? build() else { return }
+        if !wired {
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: buffer.format)
+            wired = true
+        }
+        if !engine.isRunning, (try? engine.start()) == nil { return }
+        player.stop()
+        player.scheduleBuffer(buffer, at: nil)
+        player.play()
+    }
+
+    private static func build() -> AVAudioPCMBuffer? {
+        let rate = 44_100.0, seconds = 0.05
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1),
+              let buf = AVAudioPCMBuffer(pcmFormat: format,
+                                         frameCapacity: AVAudioFrameCount(rate * seconds))
+        else { return nil }
+        buf.frameLength = buf.frameCapacity
+        let samples = buf.floatChannelData![0]
+        let volume: Float = 0.009   // 0.018 at the web's 0.5 master
+        for i in 0..<Int(buf.frameLength) {
+            let t = Float(i) / Float(rate)
+            let square: Float = sinf(2 * .pi * 2400 * t) >= 0 ? 1 : -1
+            // Linear ramp up over 12ms, then an exponential fall to 0.001 by 30ms.
+            let envelope = t < 0.012 ? t / 0.012 : (t < 0.03 ? powf(0.001 / volume, (t - 0.012) / 0.018) : 0)
+            samples[i] = square * volume * envelope
+        }
+        buffer = buf
+        return buf
+    }
+}
