@@ -131,8 +131,8 @@ T.check("every icon token resolves to a symbol that exists on this system",
 T.check("all \(heroTokens.count + appTokens.count) live icon tokens have a real mapping",
         fellBack.isEmpty, "fell back to the default: \(fellBack.joined(separator: ", "))")
 T.equal("an unknown token falls back", NoteIcon.symbol(for: "__hero:NotARealIcon"), "doc.text.fill")
-T.equal("a nil token falls back", NoteIcon.symbol(for: nil), "doc.text.fill")
-T.equal("a non-prefixed token falls back", NoteIcon.symbol(for: "plain"), "doc.text.fill")
+T.equal("a nil token shows the title initial", NoteIcon.symbol(for: nil, title: "Plan"), "p.square.fill")
+T.equal("a non-prefixed token shows the title initial, N when blank", NoteIcon.symbol(for: "plain"), "n.square.fill")
 T.check("__userrecon is drawn as a composite", NoteIcon.isComposite("__userrecon"))
 T.check("a plain token is not a composite", !NoteIcon.isComposite("__repoaudit"))
 for part in ["magnifyingglass", "person.fill"] {
