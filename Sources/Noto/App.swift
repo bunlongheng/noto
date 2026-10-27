@@ -654,12 +654,12 @@ struct NoteListView: View {
     @ViewBuilder
     private func rowBackground(_ note: Note) -> some View {
         if state.selected == note.id {
-            RoundedRectangle(cornerRadius: 6)
+            Rectangle()
                 .fill(rowTint(note))
                 .padding(.horizontal, 2)
         } else {
             // Hover wears the note's colour at 30%, brighter than the web's 12% to read on macOS.
-            RoundedRectangle(cornerRadius: 6)
+            Rectangle()
                 .fill(rowTint(note).opacity(hovered == note.id ? 0.3 : 0))
                 .padding(.horizontal, 2)
                 .animation(.easeOut(duration: 0.15), value: hovered == note.id)
