@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// Maps the icon token the API stores on a note to an SF Symbol.
 ///
@@ -103,6 +104,9 @@ enum NoteIcon {
         return name
     }
 
+    /// Tokens drawn by `NoteIconView` because no single SF Symbol fits.
+    static func isComposite(_ token: String?) -> Bool { token == "__userrecon" }
+
     /// Computed once, immutable, therefore Sendable - a mutable static cache was
     /// a hard error under the Swift 6 language mode the package declares.
     private static let available: Set<String> = Set(
@@ -112,4 +116,25 @@ enum NoteIcon {
     )
 
     private static func exists(_ name: String) -> Bool { available.contains(name) }
+}
+
+/// A note's icon. Composite tokens are layered from 2 symbols; everything else
+/// is the plain SF Symbol, so `.font` and `.foregroundStyle` apply the same way.
+struct NoteIconView: View {
+    let token: String?
+
+    var body: some View {
+        if NoteIcon.isComposite(token) {
+            // __userrecon: a person inside the lens of a magnifying glass.
+            // Scaling about this anchor lands the person's centre on the lens
+            // centre (about 41% in on both axes), at any font size.
+            ZStack {
+                Image(systemName: "magnifyingglass")
+                Image(systemName: "person.fill")
+                    .scaleEffect(0.42, anchor: UnitPoint(x: 0.345, y: 0.345))
+            }
+        } else {
+            Image(systemName: NoteIcon.symbol(for: token))
+        }
+    }
 }
