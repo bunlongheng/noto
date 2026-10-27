@@ -600,6 +600,8 @@ struct NoteListView: View {
                 }
             }
             .padding(.horizontal, density == .icons ? 6 : 10)
+            // Lifted off centre so the gap to the toolbar above matches the gap below.
+            .padding(.bottom, 9)
             .frame(height: 32)
             .background(Color.secondary.opacity(0.16))
 
