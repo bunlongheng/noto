@@ -424,6 +424,23 @@ struct NoteDetailView: View {
     @FocusState private var titleFocused: Bool
     @State private var detailWidth: CGFloat = 0
 
+    private var titleItem: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            TextField("Title", text: $draftTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14.3, weight: .semibold)) // headline (13pt) + 10%
+                .foregroundStyle(.white) // solid on the colour glow, never the dimmed toolbar grey
+                .focused($titleFocused)
+                .onSubmit { commitTitle(); NSApp.keyWindow?.makeFirstResponder(nil) }
+                // onExitCommand never fires for a field in the toolbar.
+                .onKeyPress(.escape) { draftTitle = note.title; NSApp.keyWindow?.makeFirstResponder(nil); return .handled }
+                // NSToolbar sizes items to their content, so a Spacer will not stretch.
+                // Fill the column minus the action buttons, so they stay on the right.
+                .frame(width: max(120, detailWidth - 340), alignment: .leading)
+                .accessibilityLabel("Title")
+        }.floating()
+    }
+
     var body: some View {
         ZStack {
             if let error {
@@ -444,21 +461,7 @@ struct NoteDetailView: View {
         // The title is an editable field, like Notes: select and Cmd+C to copy, type and
         // press Return (or click away) to rename, Esc to put it back.
         .navigationTitle(note.title)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                TextField("Title", text: $draftTitle)
-                    .textFieldStyle(.plain)
-                    .font(.headline)
-                    .focused($titleFocused)
-                    .onSubmit { commitTitle(); NSApp.keyWindow?.makeFirstResponder(nil) }
-                    // onExitCommand never fires for a field in the toolbar.
-                    .onKeyPress(.escape) { draftTitle = note.title; NSApp.keyWindow?.makeFirstResponder(nil); return .handled }
-                    // NSToolbar sizes items to their content, so a Spacer will not stretch.
-                    // Fill the column minus the 5 action buttons, so they stay on the right.
-                    .frame(width: max(120, detailWidth - 245), alignment: .leading)
-                    .accessibilityLabel("Title")
-            }
-        }
+        .toolbar { titleItem }
         .background(GeometryReader { g in
             Color.clear
                 .onAppear { detailWidth = g.size.width }
@@ -544,5 +547,14 @@ extension AnyTransition {
     static var wipeDown: AnyTransition {
         .asymmetric(insertion: .identity,
                     removal: .modifier(active: WipeDown(progress: 1), identity: WipeDown(progress: 0)))
+    }
+}
+
+extension ToolbarContent {
+    /// Each toolbar button floats on its own, without the shared glass bubble
+    /// macOS 26 draws around neighbouring items.
+    @ToolbarContentBuilder
+    func floating() -> some ToolbarContent {
+        if #available(macOS 26, *) { sharedBackgroundVisibility(.hidden) } else { self }
     }
 }
