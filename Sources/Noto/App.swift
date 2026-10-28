@@ -131,11 +131,6 @@ struct RootView: View {
     @State private var wideWidth: CGFloat = 320
     @State private var sidebarWidth: CGFloat = 320
 
-    private var countLabel: String {
-        let total = state.viewingTrash ? state.trashNotes.count : state.notes.count
-        return state.query.isEmpty ? "\(total)" : "\(state.visible.count) of \(total)"
-    }
-
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
             NoteListView()
@@ -148,30 +143,19 @@ struct RootView: View {
                         .onChange(of: g.size.width) { _, w in sidebarWidth = w }
                 })
                 .toolbar {
-                    // Title on the left, the column buttons on the right. NSToolbar sizes
-                    // an item to its content, so the row is given the column's width
-                    // minus the traffic lights.
+                    // The column buttons on the right. NSToolbar sizes an item to its
+                    // content, so the row is given the column's width minus the traffic lights.
                     ToolbarItem(placement: .automatic) {
                         HStack(spacing: 8) {
-                            if sidebarWidth > 150 {
-                                Text(state.viewingTrash ? "Trash" : "All Notes").font(.system(size: 12, weight: .semibold))
-                                    .lineLimit(1).fixedSize()
-                                Text(countLabel)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .lineLimit(1).fixedSize()
-                                    .padding(.horizontal, 5).padding(.vertical, 2)
-                                    .background(Color.secondary.opacity(0.15))
-                                    .clipShape(Capsule())
-                            }
                             Spacer(minLength: 0)
-                            Button { columns = .detailOnly } label: { Image(systemName: "sidebar.left") }
+                            Button { columns = .detailOnly } label: { Image(systemName: "sidebar.left").toolIcon() }
                                 .help("Hide the note list").accessibilityLabel("Hide sidebar")
-                            Button(action: cycleWidth) { Image(systemName: "arrow.left.to.line.compact") }
+                            Button(action: cycleWidth) { Image(systemName: "arrow.left.to.line.compact").toolIcon() }
                                 .help("Squeeze the list: narrow, then icons, then back")
                                 .accessibilityLabel("Narrow note list")
                         }
                         .frame(width: max(60, sidebarWidth - 96))
-                    }
+                    }.floating()
                 }
         } detail: {
             VStack(spacing: 0) {
@@ -208,6 +192,12 @@ struct RootView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .toolbarBackground(.hidden, for: .windowToolbar)
+        }
+        // The whole top nav, drawn under the see-through toolbar.
+        .background {
+            VStack(spacing: 0) { TopGlow().frame(height: 52); Spacer(minLength: 0) }
+                .ignoresSafeArea(edges: .top)
         }
         // The list's own toolbar carries the sidebar button while the list is open;
         // the system one returns only when the list is hidden, so it can be reopened.
@@ -223,16 +213,16 @@ struct RootView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { state.composerOpen = true } label: { Image(systemName: "square.and.pencil") }
+                Button { state.composerOpen = true } label: { Image(systemName: "square.and.pencil").toolIcon() }
                     .help("New note (Cmd+N)")
                     .accessibilityLabel("New note")
-            }
+            }.floating()
             ToolbarItem(placement: .primaryAction) {
-                Button { copyNote() } label: { Image(systemName: "doc.on.doc") }
+                Button { copyNote() } label: { Image(systemName: "doc.on.doc").toolIcon() }
                     .disabled(state.selectedNote == nil)
                     .help("Copy the note with its formatting, ready to paste into an email (Cmd+Shift+C)")
                     .accessibilityLabel("Copy note")
-            }
+            }.floating()
             // WebP appears only when cwebp is installed. Copy is always there, so
             // this is a menu even on a Mac that can only write PNG.
             ToolbarItem(placement: .primaryAction) {
@@ -245,43 +235,43 @@ struct RootView: View {
                     Button("Copy as SVG") { copyImage() }
                     Button("Copy for Agent (text)") { copyForAgent() }
                 } label: {
-                    Image(systemName: "square.and.arrow.down")
+                    Image(systemName: "square.and.arrow.down").toolIcon()
                 }
                 .disabled(state.selectedNote == nil)
                 .help("Save the whole note as an image (Cmd+S), copy it as SVG (Cmd+Option+Shift+C), or as text for an agent (Cmd+Shift+T)")
                 .accessibilityLabel("Save or copy note as image")
-            }
+            }.floating()
             // The condition wraps the ITEMS, not their contents: an `if` inside a
             // ToolbarItem collapses to an empty item that never appears.
             if state.viewingTrash {
                 ToolbarItem(placement: .primaryAction) {
                     Button { Task { await state.restoreSelected() } } label: {
-                        Image(systemName: "arrow.uturn.backward")
+                        Image(systemName: "arrow.uturn.backward").toolIcon()
                     }
                     .disabled(state.selectedNote == nil)
                     .help("Put this note back where it came from")
                     .accessibilityLabel("Restore note")
-                }
+                }.floating()
                 ToolbarItem(placement: .primaryAction) {
-                    Button { confirmingEmpty = true } label: { Image(systemName: "trash.slash") }
+                    Button { confirmingEmpty = true } label: { Image(systemName: "trash.slash").toolIcon() }
                         .disabled(state.trashNotes.isEmpty)
                         .help("Delete everything in TRASH permanently")
                         .accessibilityLabel("Empty trash")
-                }
+                }.floating()
             } else {
-                ToolbarItem(placement: .primaryAction) { ShareMenu(passcodeSheet: $settingPasscode, inviteSheet: $inviting) }
+                ToolbarItem(placement: .primaryAction) { ShareMenu(passcodeSheet: $settingPasscode, inviteSheet: $inviting) }.floating()
                 ToolbarItem(placement: .primaryAction) {
                 // The button asks first; Cmd+Delete does not. A click can land by
                 // accident on a toolbar you were only passing through - the
                 // shortcut is deliberate, and confirming it every time would be
                 // noise on the gesture that exists to be fast.
-                    Button { confirmingTrash = true } label: { Image(systemName: "trash") }
+                    Button { confirmingTrash = true } label: { Image(systemName: "trash").toolIcon() }
                         .disabled(state.selectedNote == nil || state.selectedNote?.frozen == true)
                         .help(state.selectedNote?.frozen == true
                               ? "This note is locked - unlock it under Share"
                               : "Move to TRASH (Cmd+Delete skips this)")
                         .accessibilityLabel("Move note to trash")
-                }
+                }.floating()
             }
         }
         .overlay(alignment: .top) {
@@ -572,30 +562,31 @@ struct NoteListView: View {
                     .help("Search all notes (Cmd+Shift+F)")
                     .accessibilityLabel("Search all notes")
                 } else {
-                    HStack(spacing: 5) {
-                        Image(systemName: "magnifyingglass").font(.system(size: 10)).foregroundStyle(.secondary)
+                    // A soft pill like Slack's search: light fill, hairline edge, roomy text.
+                    HStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                         FilterField(text: $state.query) { state.stepSelection($0) }
-                            .frame(height: 14)
+                            .frame(height: 16)
                         if !state.query.isEmpty {
-                            Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 10)) }
+                            Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
                                 .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
                         }
                     }
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.14))
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .padding(.horizontal, 9).frame(height: 22)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.08)))
 
                     if state.isLoading { ProgressView().scaleEffect(0.5).frame(width: 14) }
                     Button {
                         state.viewingTrash.toggle()
                         if state.viewingTrash { state.loadTrash() } else { state.selectFirstIfNeeded() }
                     } label: {
-                        Image(systemName: state.viewingTrash ? "chevron.backward" : "trash")
+                        Image(systemName: state.viewingTrash ? "chevron.backward" : "trash").toolIcon()
                     }
                     .buttonStyle(.plain)
                     .help(state.viewingTrash ? "Back to all notes" : "Show TRASH")
                     .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
-                    Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: { Image(systemName: "arrow.clockwise") }
+                    Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: { Image(systemName: "arrow.clockwise").toolIcon() }
                         .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
                 }
             }
@@ -802,8 +793,8 @@ struct FilterField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSTextField {
         let field = GuardedTextField()
-        field.placeholderString = "Filter by title"
-        field.font = .systemFont(ofSize: 11)
+        field.placeholderString = "Search notes"
+        field.font = .systemFont(ofSize: 13)
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
@@ -952,4 +943,3 @@ struct SubmitterBadge: View {
         .help(note.createdByKey ?? note.createdByMachine ?? "Created in the notes app")
     }
 }
-

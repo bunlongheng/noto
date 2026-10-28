@@ -115,3 +115,41 @@ enum Ink {
         return luma > 0.6 ? Color(red: 0.11, green: 0.11, blue: 0.12) : .white
     }
 }
+
+/// A glow across the whole top nav: the tab before the open note on the left
+/// quarter (black when there is none), the note's own colour across the middle
+/// half, and the tab after it on the right quarter (black again at the end).
+struct TopGlow: View {
+    @EnvironmentObject var state: AppState
+
+    private func tint(_ n: Note?) -> Color {
+        guard let c = n?.parsedColor else { return .black }
+        return Color(red: c.r, green: c.g, blue: c.b)
+    }
+
+    private var stops: [Gradient.Stop] {
+        let tabs = state.tabs
+        guard let i = tabs.firstIndex(where: { $0.id == state.selected }) else { return [.init(color: .clear, location: 0)] }
+        let prev = i > 0 ? tabs[i - 1] : nil
+        let next = i + 1 < tabs.count ? tabs[i + 1] : nil
+        let mid = tint(tabs[i])
+        return [.init(color: tint(prev), location: 0), .init(color: mid, location: 0.25),
+                .init(color: mid, location: 0.75), .init(color: tint(next), location: 1)]
+    }
+
+    var body: some View {
+        LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
+            .opacity(0.55)
+            .mask(LinearGradient(colors: [.black, .black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom))
+            .animation(.easeInOut(duration: 0.35), value: state.selected)
+            .allowsHitTesting(false)
+    }
+}
+
+extension Image {
+    /// Every chrome icon - toolbar, sidebar, the list's band - at 1 size, so the
+    /// toolbar's own large symbol scale cannot make some bigger than others.
+    func toolIcon() -> some View {
+        font(.system(size: 14)).imageScale(.medium).frame(width: 20, height: 20)
+    }
+}

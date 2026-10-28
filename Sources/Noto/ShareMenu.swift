@@ -54,7 +54,7 @@ struct ShareMenu: View {
                 }
             }
         } label: {
-            Image(systemName: symbol)
+            Image(systemName: symbol).toolIcon()
         }
         .disabled(state.selectedNote == nil)
         .help("Share this note")
