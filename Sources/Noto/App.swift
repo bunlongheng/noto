@@ -565,6 +565,8 @@ struct NoteListView: View {
     @EnvironmentObject var state: AppState
     @State private var width: CGFloat = 320
     @State private var hovered: Note.ID?
+    /// Follows isLoading, held for at least 1 turn so a fast pull still shows it spin.
+    @State private var spinning = false
 
     private var density: ListDensity { ListDensity(width: width) }
 
@@ -598,7 +600,6 @@ struct NoteListView: View {
                     .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.08)))
 
-                    if state.isLoading { ProgressView().scaleEffect(0.5).frame(width: 14) }
                     Button {
                         state.viewingTrash.toggle()
                         if state.viewingTrash { state.loadTrash() } else { state.selectFirstIfNeeded() }
@@ -608,7 +609,13 @@ struct NoteListView: View {
                     .buttonStyle(.plain)
                     .help(state.viewingTrash ? "Back to all notes" : "Show TRASH")
                     .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
-                    Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: { Image(systemName: "arrow.clockwise").toolIcon() }
+                    Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: {
+                        // Spins while a pull runs (Cmd+R, the button, or automatic).
+                        Image(systemName: "arrow.clockwise").toolIcon()
+                            .rotationEffect(.degrees(spinning ? 360 : 0))
+                            .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : nil,
+                                       value: spinning)
+                    }
                         .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
                 }
             }
@@ -616,6 +623,10 @@ struct NoteListView: View {
             // Lifted off centre so the gap to the toolbar above matches the gap below.
             .padding(.bottom, 9)
             .frame(height: 32)
+            .onChange(of: state.isLoading) { _, loading in
+                if loading { spinning = true }
+                else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { if !state.isLoading { spinning = false } } }
+            }
             .background(Color.secondary.opacity(0.16))
 
             if let error = state.error, state.notes.isEmpty {
