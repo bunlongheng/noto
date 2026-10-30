@@ -22,7 +22,7 @@ struct NotoApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(after: .toolbar) {
-                Button("Refresh") { state.refresh() }
+                Button("Refresh") { state.viewingTrash ? state.loadTrash() : state.refresh() }
                     .keyboardShortcut("r", modifiers: .command)
                 Button("Find in Note") { NotificationCenter.default.post(name: .focusFind, object: nil) }
                     .keyboardShortcut("f", modifiers: .command)
@@ -130,6 +130,8 @@ struct RootView: View {
     /// The width to come back to, so widening lands where the list was.
     @State private var wideWidth: CGFloat = 320
     @State private var sidebarWidth: CGFloat = 320
+    /// When the app last lost focus, to refresh on return after a long absence.
+    @State private var leftAt: Date?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
@@ -204,6 +206,26 @@ struct RootView: View {
         .toolbar(removing: columns == .detailOnly ? nil : .sidebarToggle)
         .frame(minWidth: 760, minHeight: 420)
         .task { state.load() }
+        // Back after a while (switched away 5+ minutes, or the Mac slept): pull
+        // what changed, so the list is current without pressing Refresh.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            leftAt = Date()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if let leftAt, Date().timeIntervalSince(leftAt) >= 5 * 60 { state.refresh() }
+            leftAt = nil
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            state.refresh()
+        }
+        // Unlocking the screen, and every 5 minutes in the background: the list is
+        // already current by the time you look, no click needed.
+        .onReceive(DistributedNotificationCenter.default().publisher(for: .init("com.apple.screenIsUnlocked"))) { _ in
+            state.refresh()
+        }
+        .onReceive(Timer.publish(every: 5 * 60, on: .main, in: .common).autoconnect()) { _ in
+            state.refresh()
+        }
         .onAppear(perform: watchKeys)
         .onReceive(NotificationCenter.default.publisher(for: .focusFind)) { _ in openFind() }
         .animation(.easeOut(duration: 0.15), value: findBarOpen)
@@ -623,9 +645,8 @@ struct NoteListView: View {
                     List(state.visible, selection: $state.selected) { note in
                         NoteRow(note: note, density: density, selected: state.selected == note.id)
                             .tag(note.id)
-                            // Separators run the full width, like the web list's row borders.
-                            .alignmentGuide(.listRowSeparatorLeading) { _ in -20 }
-                            .alignmentGuide(.listRowSeparatorTrailing) { d in d.width + 20 }
+                            // No separators: row colours meet with no seams or gaps.
+                            .listRowSeparator(.hidden)
                             .onHover { inside in
                                 if inside { hovered = note.id; HoverTick.play() } else if hovered == note.id { hovered = nil }
                             }
@@ -660,9 +681,11 @@ struct NoteListView: View {
             Rectangle()
                 .fill(rowTint(note))
         } else {
-            // Hover wears the note's colour at 30%, brighter than the web's 12% to read on macOS.
+            // Hover wears the note's colour at 30%, brighter than the web's 12% to read on macOS,
+            // edged with a 1px line of the full colour.
             Rectangle()
                 .fill(rowTint(note).opacity(hovered == note.id ? 0.3 : 0))
+                .overlay(Rectangle().strokeBorder(rowTint(note), lineWidth: 1).opacity(hovered == note.id ? 1 : 0))
                 .animation(.easeOut(duration: 0.15), value: hovered == note.id)
         }
     }

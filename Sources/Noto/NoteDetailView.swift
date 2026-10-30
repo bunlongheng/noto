@@ -473,7 +473,9 @@ struct NoteDetailView: View {
         .onChange(of: note.title) { _, t in if !titleFocused { draftTitle = t } }
         .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
         .onChange(of: host.loads) { lift() }
-        .task(id: note.id) {
+        // Keyed on the edit time too: a refresh (Cmd+R or automatic) that brings a
+        // newer version of the open note reloads the page, not just the list.
+        .task(id: "\(note.id)|\(note.updatedAt ?? "")") {
             error = nil; host.clear(); loading = true
             do {
                 let next = try await state.body(for: note)
