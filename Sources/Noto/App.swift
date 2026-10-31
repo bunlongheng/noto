@@ -208,6 +208,14 @@ struct RootView: View {
         .task { state.load() }
         // Back after a while (switched away 5+ minutes, or the Mac slept): pull
         // what changed, so the list is current without pressing Refresh.
+        // Full screen moves the toolbar into a window of its own, out of reach of the
+        // glow behind the page, so the glow is mounted in that window too.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+            FullScreenGlow.mount(state)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            FullScreenGlow.mount(state)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             leftAt = Date()
         }
@@ -982,5 +990,46 @@ struct SubmitterBadge: View {
         }
         .frame(width: size, height: size)
         .help(note.createdByKey ?? note.createdByMachine ?? "Created in the notes app")
+    }
+}
+
+/// The top glow inside the full-screen toolbar window, just above its blur and
+/// below the buttons. Mounted once per window; the view follows AppState itself.
+@MainActor
+enum FullScreenGlow {
+    private static let id = NSUserInterfaceItemIdentifier("noto.glow")
+
+    static func mount(_ state: AppState) {
+        // The toolbar window appears a beat after full screen begins.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            for w in NSApp.windows where String(describing: type(of: w)).contains("FullScreen") {
+                // The title bar's own background is opaque in full screen, so the
+                // glow goes just above it and below the toolbar items.
+                guard let root = w.contentView?.superview ?? w.contentView,
+                      root.firstDescendant(id) == nil,
+                      let bar = root.firstDescendant(named: "NSTitlebarView"),
+                      let backing = bar.subviews.last(where: { "\(type(of: $0))".contains("TitlebarBackground") })
+                else { continue }
+                let glow = NSHostingView(rootView: TopGlow().environmentObject(state))
+                glow.identifier = id
+                glow.frame = bar.bounds
+                glow.autoresizingMask = [.width, .height]
+                bar.addSubview(glow, positioned: .above, relativeTo: backing)
+            }
+        }
+    }
+}
+
+private extension NSView {
+    func firstDescendant(_ id: NSUserInterfaceItemIdentifier) -> NSView? {
+        if identifier == id { return self }
+        for v in subviews { if let f = v.firstDescendant(id) { return f } }
+        return nil
+    }
+
+    func firstDescendant(named name: String) -> NSView? {
+        if "\(type(of: self))" == name { return self }
+        for v in subviews { if let f = v.firstDescendant(named: name) { return f } }
+        return nil
     }
 }
