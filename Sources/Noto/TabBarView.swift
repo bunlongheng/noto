@@ -136,12 +136,14 @@ enum Ink {
 struct TopGlow: View {
     @EnvironmentObject var state: AppState
 
-    private func tint(_ n: Note?) -> Color {
+    private static func tint(_ n: Note?) -> Color {
         guard let c = n?.parsedColor else { return .black }
         return Color(red: c.r, green: c.g, blue: c.b)
     }
 
-    private var stops: [Gradient.Stop] {
+    private var stops: [Gradient.Stop] { Self.stops(state) }
+
+    static func stops(_ state: AppState) -> [Gradient.Stop] {
         let tabs = state.tabs
         guard let i = tabs.firstIndex(where: { $0.id == state.selected }) else { return [.init(color: .clear, location: 0)] }
         let prev = i > 0 ? tabs[i - 1] : nil
