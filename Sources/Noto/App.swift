@@ -542,7 +542,7 @@ struct RootView: View {
             guard flags.isEmpty, event.keyCode == 123 || event.keyCode == 124 else { return event }
             if let responder = event.window?.firstResponder,
                responder is NSTextView || responder is NSTextField { return event }
-            state.stepTab(event.keyCode == 123 ? -1 : 1)
+            state.step(event.keyCode == 123 ? -1 : 1, host: host)
             return nil
         }
     }

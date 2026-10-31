@@ -20,6 +20,8 @@ final class WebHost: ObservableObject {
     /// Bumped each time the web view finishes a load, so the loading veil lifts
     /// only once the new page is actually drawn.
     @Published var loads = 0
+    /// `.slide` sections in the open page: 0 for a plain note, the count for a deck.
+    @Published private(set) var slides = 0
     /// Page zoom, kept here rather than on the web view so it survives switching
     /// notes - the web view is reused, but a fresh load would otherwise be the
     /// only thing carrying it.
@@ -81,6 +83,25 @@ final class WebHost: ObservableObject {
             let value = try? result.get()
             Task { @MainActor in self?.current = (value as? Int) ?? 0 }
         }
+    }
+
+    /// Counted after each load, so the < > stepper knows whether to turn slides.
+    func countSlides() {
+        view?.evaluateJavaScript("document.querySelectorAll('.slide').length", in: nil, in: .defaultClient) { [weak self] result in
+            let n = (try? result.get()) as? Int ?? 0
+            Task { @MainActor in self?.slides = n }
+        }
+    }
+
+    func resetSlides() { slides = 0 }
+
+    /// Press the deck's own arrow key. Decks listen for keydown and call their
+    /// go(), so the page keeps its slide counter and transitions.
+    func stepSlide(_ direction: Int) {
+        let key = direction < 0 ? "ArrowLeft" : "ArrowRight"
+        view?.evaluateJavaScript(
+            "(document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', {key: '\(key)', bubbles: true}))",
+            in: nil, in: .defaultClient)
     }
 
     func clear() {
@@ -251,7 +272,15 @@ struct HTMLView: NSViewRepresentable {
         init(host: WebHost) { self.host = host }
 
         @MainActor
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { host.loads += 1 }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            host.loads += 1
+            host.countSlides()
+        }
+
+        @MainActor
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            host.resetSlides()
+        }
 
         /// A note is a document to read, not a browser. Only the initial
         /// loadHTMLString is allowed in place; a link opens in the default browser

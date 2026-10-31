@@ -10,6 +10,7 @@ import SwiftUI
 /// notes one at a time, the way the web app does.
 struct TabBarView: View {
     @EnvironmentObject var state: AppState
+    @EnvironmentObject var host: WebHost
 
     private let h: CGFloat = 26
 
@@ -41,25 +42,26 @@ struct TabBarView: View {
 
     /// < ALL (n) > - the same trailing control the web strip carries.
     private var stepper: some View {
-        HStack(spacing: 2) {
-            arrow("chevron.left", -1, "Previous note (←)")
-            Text("ALL (\(state.tabs.count))")
+        let deck = state.onDeck(host)
+        return HStack(spacing: 2) {
+            arrow("chevron.left", -1, deck ? "Previous slide (←)" : "Previous note (←)")
+            Text(deck ? "SLIDES (\(host.slides))" : "ALL (\(state.tabs.count))")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.secondary)
                 .fixedSize()
-            arrow("chevron.right", 1, "Next note (→)")
+            arrow("chevron.right", 1, deck ? "Next slide (→)" : "Next note (→)")
         }
         .padding(.horizontal, 6)
         .frame(height: h + 6)
     }
 
     private func arrow(_ symbol: String, _ direction: Int, _ help: String) -> some View {
-        Button { state.stepTab(direction) } label: {
+        Button { state.step(direction, host: host) } label: {
             Image(systemName: symbol).font(.system(size: 10, weight: .bold))
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
-        .disabled(state.tabs.count < 2)
+        .disabled(state.tabs.count < 2 && !state.onDeck(host))
         .help(help)
         .accessibilityLabel(help)
     }
@@ -103,6 +105,18 @@ struct TabBarView: View {
         return Color(red: c.r, green: c.g, blue: c.b)
     }
 
+}
+
+extension AppState {
+    /// The open note is a deck: typed so, or a page with more than 1 `.slide`.
+    func onDeck(_ host: WebHost) -> Bool {
+        selectedNote?.type == "deck" || host.slides > 1
+    }
+
+    /// < > and the arrow keys: turn the slide on a deck, flip the tab otherwise.
+    func step(_ direction: Int, host: WebHost) {
+        onDeck(host) ? host.stepSlide(direction) : stepTab(direction)
+    }
 }
 
 /// Folder colours run from pale yellow to near-black, so anything drawn ON a folder
