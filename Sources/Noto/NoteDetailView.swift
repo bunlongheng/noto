@@ -338,6 +338,9 @@ struct HTMLView: NSViewRepresentable {
           ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.18);border-radius:6px}*{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,0.18) transparent}
           html,body{background:#ffffff;color:#1a1a1a;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;line-height:1.6;font-size:15px}a{color:#0066cc}body{zoom:0.67}
           html,body{max-width:100%!important;overflow-x:hidden!important}*,*::before,*::after{box-sizing:border-box}body{overflow-wrap:break-word;word-break:break-word}img,svg,video,canvas,iframe{max-width:100%!important;height:auto}pre{max-width:100%;overflow-x:auto}table{max-width:100%;table-layout:fixed;width:100%}td,th{overflow-wrap:break-word;word-break:break-word}
+          /* A deck sizes its slides to 100vw x 100vh, so the 67% zoom drew them at
+             2/3 of the window. Unzoomed, they fill it and follow every resize. */
+          body:has(.slide.active){zoom:1}
           pre.plain { white-space:pre-wrap; word-wrap:break-word; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
           /* Every match wears the SAME yellow - two fills (yellow for the rest,
              orange for the current one) read as two kinds of hit rather than one
