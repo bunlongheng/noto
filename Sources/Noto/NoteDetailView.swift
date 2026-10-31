@@ -486,9 +486,6 @@ struct NoteDetailView: View {
                 LoadingVeil(note: note).transition(.wipeDown)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if content != nil, !state.viewingTrash { TagBar(note: note, hovering: hovering) }
-        }
         .onHover { hovering = $0 }
         // The title is an editable field, like Notes: select and Cmd+C to copy, type and
         // press Return (or click away) to rename, Esc to put it back.

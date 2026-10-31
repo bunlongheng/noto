@@ -176,7 +176,7 @@ struct RootView: View {
                         .overlay(alignment: .topTrailing) {
                             if findBarOpen { findBar }
                         }
-                        .overlay(alignment: .bottomLeading) { SubmitterChip(note: note) }
+                        .overlay(alignment: .bottomLeading) { if columns != .detailOnly { SubmitterChip(note: note) } }
                         // Top centre: the find bar owns the top right and the
                         // submitter chip the bottom left, so this lands on the one
                         // edge nothing else uses.
@@ -611,10 +611,14 @@ struct NoteListView: View {
                     .accessibilityLabel(state.viewingTrash ? "Back to all notes" : "Show trash")
                     Button { state.viewingTrash ? state.loadTrash() : state.refresh() } label: {
                         // Spins while a pull runs (Cmd+R, the button, or automatic).
-                        Image(systemName: "arrow.clockwise").toolIcon()
-                            .rotationEffect(.degrees(spinning ? 360 : 0))
-                            .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : nil,
-                                       value: spinning)
+                        // Driven per frame: a repeatForever animation keyed on a flag
+                        // stuttered or never started when a pull ended inside 1 frame.
+                        TimelineView(.animation(paused: !spinning)) { t in
+                            Image(systemName: "arrow.triangle.2.circlepath").toolIcon()
+                                .rotationEffect(.degrees(spinning
+                                    ? t.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360 : 0))
+                                .foregroundStyle(spinning ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+                        }
                     }
                         .buttonStyle(.plain).help("Refresh (Cmd+R)").accessibilityLabel("Refresh notes")
                 }
@@ -920,6 +924,7 @@ struct SubmitterChip: View {
 /// The web app's footer bar: who, when, how long ago, and the folder. Shown only
 /// with the sidebar closed - open, the list row already carries all of it.
 struct NoteFooter: View {
+    @EnvironmentObject var state: AppState
     let note: Note
 
     var body: some View {
@@ -934,6 +939,8 @@ struct NoteFooter: View {
             }
             Spacer()
             if let folder = note.folderName { Text(folder) }
+            // Hashtags live here only, and only when the note has some.
+            ForEach(state.tags[note.id] ?? note.tags ?? [], id: \.self) { Text("#" + $0) }
         }
         .font(.system(size: 11, design: .monospaced))
         .foregroundStyle(.secondary)
